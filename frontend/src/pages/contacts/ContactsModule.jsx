@@ -800,13 +800,25 @@ function ImportScreen({ onBack }) {
       const res = await contactsAPI.importWithMapping(file, mapping);
       setProgress(90);
       if (res?.data?.success) {
+        const { imported = 0, duplicates = 0, invalidRows = [], errors = [] } = res.data.data;
         setImportResult(res.data.data);
-        toast.success(`Imported ${res.data.data.inserted} contacts`);
+        const errCount = (invalidRows?.length || 0) + (errors?.length || 0);
+        
+        let msg = `Imported ${imported} contacts`;
+        if (duplicates > 0) msg += ` (${duplicates} existing skipped)`;
+        
+        if (errCount > 0) {
+          toast.error(`${msg}. ${errCount} errors found.`);
+        } else {
+          toast.success(msg);
+        }
       }
-      else setImportResult({ inserted:0, duplicates:[], invalidRows:[] });
+      else setImportResult({ imported:0, duplicates:0, invalidRows:[], errors:[] });
     } catch (err) {
       console.error('import failed', err);
-      setImportResult({ inserted:0, duplicates:[], invalidRows:[] });
+      const errorMsg = err.response?.data?.message || 'Failed to import contacts';
+      toast.error(errorMsg);
+      setImportResult({ imported:0, duplicates:0, invalidRows:[], errors:[] });
     } finally {
       setProgress(100); setImporting(false);
       window.dispatchEvent(new Event('contacts:refresh'));
@@ -877,6 +889,24 @@ function ImportScreen({ onBack }) {
               <span style={{ padding:"8px 18px", borderRadius:8, border:`1px solid ${T.border}`,
                 background:T.card, fontSize:13, color:T.muted, fontWeight:600 }}>Browse file</span>
               <input ref={fileRef} type="file" accept=".csv" style={{display:"none"}} onChange={e=>{ if(e.target.files[0]) handleFile(e.target.files[0]); }} />
+            </div>
+
+            {/* Sample CSV download */}
+            <div style={{ marginTop:14, textAlign:'center' }}>
+              <button
+                onClick={() => {
+                  const csv = `Name,Phone,Email,Tag,City\nSiddhant Hardik,+917838033664,siddhant@example.com,Delhi,New Delhi\nSaroj Kumari,+917303443664,saroj@example.com,Delhi,New Delhi`;
+                  const blob = new Blob([csv], { type: 'text/csv' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url; a.download = 'sample_contacts.csv'; a.click();
+                  URL.revokeObjectURL(url);
+                }}
+                style={{ display:'inline-flex', alignItems:'center', gap:6, padding:'7px 16px', borderRadius:8,
+                  border:`1px solid ${T.green}`, background:'#F0FDF4', color:T.green, fontSize:13, fontWeight:600, cursor:'pointer' }}>
+                <svg width='14' height='14' fill='none' viewBox='0 0 24 24' stroke='currentColor' strokeWidth='2'><path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/><polyline points='7 10 12 15 17 10'/><line x1='12' y1='15' x2='12' y2='3'/></svg>
+                Download sample CSV
+              </button>
             </div>
 
             <div style={{ marginTop:20, padding:"16px", background:T.card, borderRadius:10, border:`1px solid ${T.border}` }}>
@@ -989,7 +1019,7 @@ function ImportScreen({ onBack }) {
             <div style={{ fontSize:18, fontWeight:700, color:T.text, marginBottom:8 }}>Import complete!</div>
             <div style={{ fontSize:13, color:T.subtle, marginBottom:28 }}>Your contacts have been processed.</div>
             <div style={{ display:"flex", gap:14, justifyContent:"center", marginBottom:28 }}>
-              {[{ label:"Imported", val: importResult ? importResult.inserted : csvPreview.length, color:T.green }, { label:"Duplicates", val: importResult ? importResult.duplicates.length : 0, color:T.amber }, { label:"Errors", val: importResult ? importResult.invalidRows.length : 0, color:T.red }].map(s=> (
+              {[{ label:"Imported", val: importResult ? (importResult.imported || 0) : csvPreview.length, color:T.green }, { label:"Duplicates", val: importResult ? (importResult.duplicates || 0) : 0, color:T.amber }, { label:"Errors", val: importResult ? (importResult.errors?.length || importResult.invalidRows?.length || 0) : 0, color:T.red }].map(s=> (
                 <div key={s.label} style={{ padding:"14px 24px", background:T.card, borderRadius:10, border:`1px solid ${T.border}`, minWidth:110 }}>
                   <div style={{ fontFamily:T.mono, fontSize:26, fontWeight:700, color:s.color }}>{s.val}</div>
                   <div style={{ fontSize:12, color:T.muted }}>{s.label}</div>

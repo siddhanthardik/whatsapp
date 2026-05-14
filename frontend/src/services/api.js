@@ -52,9 +52,9 @@ export const authAPI = {
   login: (payload) => api.post('/auth/login', payload),
   register: (payload) => api.post('/auth/register', payload),
   logout: (refreshToken) => api.post('/auth/logout', { refreshToken }),
-  refreshToken: (refreshToken) => api.post('/auth/refresh', { refreshToken }),
-  forgotPassword: (email) => api.post('/auth/forgot', { email }),
-  resetPassword: (token, password) => api.post('/auth/reset', { token, password }),
+  refreshToken: (refreshToken) => api.post('/auth/refresh-token', { refreshToken }),
+  forgotPassword: (email) => api.post('/auth/forgot-password', { email }),
+  resetPassword: (token, password) => api.post('/auth/reset-password', { token, password }),
   verify2fa: (payload) => api.post('/auth/verify-2fa', payload),
 }
 

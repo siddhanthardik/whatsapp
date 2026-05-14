@@ -1,6 +1,6 @@
 import React from 'react'
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+
 import { Toaster } from 'react-hot-toast'
 import useAuthStore from './store/authStore'
 
@@ -26,7 +26,7 @@ import {
   UsersPage,
 } from './pages'
 
-const queryClient = new QueryClient()
+
 
 function PrivateRoute({ children }) {
   const { isAuthenticated } = useAuthStore()
@@ -47,7 +47,7 @@ export default function App() {
   const { isAuthenticated } = useAuthStore()
 
   return (
-    <QueryClientProvider client={queryClient}>
+    <>
       <BrowserRouter>
         <Toaster />
         <Routes>
@@ -84,6 +84,6 @@ export default function App() {
           <Route path="*" element={<div>Not Found</div>} />
         </Routes>
       </BrowserRouter>
-    </QueryClientProvider>
+    </>
   )
 }

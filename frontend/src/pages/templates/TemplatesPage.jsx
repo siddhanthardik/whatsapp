@@ -38,7 +38,7 @@ export default function TemplatesPage() {
   const [categoryFilter, setCategoryFilter] = useState('all')
 
   const { data: templatesResp } = useTemplates({ limit: 200 })
-  const templates = Array.isArray(templatesResp) ? templatesResp : Array.isArray(templatesResp?.items) ? templatesResp.items : []
+  const templates = Array.isArray(templatesResp?.templates) ? templatesResp.templates : Array.isArray(templatesResp) ? templatesResp : []
 
   const deleteMutation = useDeleteTemplate()
   const submitMutation = useSubmitTemplate()
@@ -51,8 +51,8 @@ export default function TemplatesPage() {
       status: t.status ? t.status.toLowerCase() : 'approved',
       category: t.category ? t.category.toLowerCase() : 'utility',
       language: t.language || 'English',
-      sent: t.sent || Math.floor(Math.random() * 50000),
-      openRate: t.openRate || (Math.random() * 40 + 50).toFixed(1),
+      sent: t.sent || 0,
+      openRate: t.openRate || 0,
       components: t.components || [{ type: 'BODY', text: 'Template body content here {{1}}' }]
     }
   })

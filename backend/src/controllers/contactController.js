@@ -8,9 +8,15 @@ function sendResponse(res, success, data = {}, message = '', status = 200) {
 
 function normalizePhone(phone) {
   if (!phone) return null;
-  const s = String(phone).trim();
-  // remove common separators
-  const cleaned = s.replace(/[\s\-()\.]/g, '');
+  let s = String(phone).trim();
+  // remove everything except digits and plus
+  let cleaned = s.replace(/[^\d+]/g, '');
+  
+  // if starts with digits but no +, prepend +
+  if (/^\d{7,15}$/.test(cleaned)) {
+    cleaned = '+' + cleaned;
+  }
+
   // ensure starts with + and digits
   if (!/^\+\d{7,15}$/.test(cleaned)) return null;
   return cleaned;
@@ -32,7 +38,9 @@ exports.importContacts = async (req, res) => {
     if (!req.file || !req.file.buffer) return sendResponse(res, false, {}, 'CSV file is required', 400);
 
     const csvText = req.file.buffer.toString('utf8');
-    const records = parse(csvText, { columns: true, skip_empty_lines: true });
+    const records = parse(csvText, { columns: true, skip_empty_lines: true, trim: true, bom: true });
+    console.log('[importContacts] Parsed records length:', records.length);
+    console.log('[importContacts] Records sample:', JSON.stringify(records.slice(0, 2), null, 2));
     if (!records || !records.length) return sendResponse(res, false, {}, 'No rows in CSV', 400);
 
     // allow client-provided mapping (file header -> target field)
@@ -40,6 +48,7 @@ exports.importContacts = async (req, res) => {
     try {
       if (req.body && req.body.mapping) {
         clientMapping = typeof req.body.mapping === 'string' ? JSON.parse(req.body.mapping) : req.body.mapping;
+        console.log('[importContacts] Received mapping:', clientMapping);
       }
     } catch (e) {
       clientMapping = null;
@@ -50,17 +59,26 @@ exports.importContacts = async (req, res) => {
       // if client mapping provided, use it
       if (clientMapping && Object.keys(clientMapping).length) {
         let phone = null; let name = null; let email = null; let tags = [];
+        // Create a normalized version of the row for easier lookup (lowercase keys)
+        const rowLower = {};
+        for (const k of Object.keys(row)) {
+          rowLower[k.toLowerCase().trim()] = row[k];
+        }
+
         for (const fileHeader of Object.keys(clientMapping)) {
           const mapped = clientMapping[fileHeader];
-          const val = row[fileHeader];
+          // Try exact match first, then lowercase match
+          const val = row[fileHeader] || rowLower[fileHeader.toLowerCase().trim()];
+          
           if (!val) continue;
-          if (mapped === 'Phone') phone = val;
-          else if (mapped === 'Name') name = val;
-          else if (mapped === 'Email') email = val;
-          else if (mapped === 'Tag' || mapped === 'Tags') tags = tags.concat(String(val).split(/[,;|]/).map(t=>t.trim()).filter(Boolean));
-          else if (mapped && mapped !== 'skip') {
-            // custom fields stored under customFields
-            // we'll attach later via raw
+          const target = String(mapped).toLowerCase();
+          
+          if (target === 'phone' || target === 'phonenumber') phone = val;
+          else if (target === 'name' || target === 'fullname') name = val;
+          else if (target === 'email') email = val;
+          else if (target === 'tag' || target === 'tags') {
+            const newTags = String(val).split(/[,;|]/).map(t=>t.trim()).filter(Boolean);
+            tags = tags.concat(newTags);
           }
         }
         return { phone, name, email, tags, raw: row };
@@ -116,8 +134,9 @@ exports.importContacts = async (req, res) => {
         tags: r.tags || [],
         customFields: r.raw || {},
         organizationId: orgId,
-        optInStatus: 'pending',
+        optInStatus: 'opted_in',
         optInSource: 'csv_import',
+        optInTimestamp: new Date(),
       });
     }
 
@@ -184,8 +203,9 @@ exports.createContact = async (req, res) => {
       tags: Array.isArray(tags) ? tags : [tags],
       lists: lists || [],
       organizationId: orgId,
-      optInStatus: 'pending',
-      optInSource: 'csv_import',
+      optInStatus: 'opted_in',
+      optInSource: 'manual',
+      optInTimestamp: new Date(),
     });
     await contact.save();
     return sendResponse(res, true, { contact }, 'Contact created', 201);

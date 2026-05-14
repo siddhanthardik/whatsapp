@@ -44,7 +44,7 @@ export default function CampaignsPage() {
   const [tick, setTick] = useState(0)
 
   const { data: campaignsResp } = useCampaigns({ limit: 200 })
-  const campaigns = Array.isArray(campaignsResp) ? campaignsResp : Array.isArray(campaignsResp?.items) ? campaignsResp.items : []
+  const campaigns = Array.isArray(campaignsResp?.campaigns) ? campaignsResp.campaigns : Array.isArray(campaignsResp) ? campaignsResp : []
 
   useEffect(() => { const iv = setInterval(() => setTick(t => t + 1), 4000); return () => clearInterval(iv) }, [])
 
