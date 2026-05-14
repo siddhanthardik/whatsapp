@@ -1,0 +1,30 @@
+{
+  "name": "whatsapp-frontend",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.94.5",
+    "axios": "^1.13.6",
+    "date-fns": "^4.1.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-hook-form": "^7.72.0",
+    "react-hot-toast": "^2.6.0",
+    "react-icons": "^5.6.0",
+    "react-router-dom": "^6.30.3",
+    "recharts": "^3.8.0",
+    "zustand": "^5.0.12"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.0.0",
+    "autoprefixer": "^10.4.27",
+    "postcss": "^8.5.8",
+    "tailwindcss": "^3.4.19",
+    "vite": "^5.0.0"
+  }
+}
