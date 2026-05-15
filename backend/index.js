@@ -141,3 +141,6 @@ process.on("unhandledRejection", (reason, p) => {
 });
 
 module.exports = app;
+const syncWhatsAppTemplates = require('./src/services/templateSyncService');
+
+syncWhatsAppTemplates();

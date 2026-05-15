@@ -49,7 +49,10 @@ function createQueue(queueName, opts = {}) {
     createClient: function (type) {
       // For each role, return a fresh ioredis instance using the same URL.
       // Bull expects separate connections for client, subscriber, and bclient.
-      return new Redis(REDIS_URL);
+      return new Redis(REDIS_URL, {
+        maxRetriesPerRequest: null,
+        enableReadyCheck: false,
+      });
     },
   }, opts));
 }
@@ -58,3 +61,4 @@ module.exports = {
   redis,
   createQueue,
 };
+
