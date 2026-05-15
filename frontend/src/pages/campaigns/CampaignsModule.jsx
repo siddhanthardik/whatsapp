@@ -611,7 +611,7 @@ function CampaignWizard({ onBack, onLaunch }) {
     if (step !== 1) return undefined;
     setTemplatesError('');
     setLoadingTemplates(true);
-    templatesAPI.list({ status: 'APPROVED' })
+    templatesAPI.list({ status: 'approved' })
       .then(res => {
         if (!mounted) return;
         const templatesArr = (res && res.data && res.data.data && res.data.data.templates) || (res && res.data && res.data.templates) || [];

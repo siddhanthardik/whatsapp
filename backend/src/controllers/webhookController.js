@@ -2,48 +2,94 @@ const Message = require('../models/Message');
 const Contact = require('../models/Contact');
 const Campaign = require('../models/Campaign');
 
-const OPT_OUT_KEYWORDS = ['STOP', 'UNSUBSCRIBE', 'CANCEL', 'END', 'QUIT'];
+const OPT_OUT_KEYWORDS = [
+  'STOP',
+  'UNSUBSCRIBE',
+  'CANCEL',
+  'END',
+  'QUIT'
+];
 
 function sendOk(res) {
   return res.status(200).send('OK');
 }
 
+/**
+ * =========================================
+ * VERIFY WHATSAPP WEBHOOK
+ * =========================================
+ */
 
-// =========================
-// VERIFY WEBHOOK (IMPORTANT)
-// =========================
+exports.verify = async (req, res) => {
+  try {
 
-exports.verify = (req, res) => {
+    const mode = req.query['hub.mode'];
+    const token = req.query['hub.verify_token'];
+    const challenge = req.query['hub.challenge'];
 
-  const VERIFY_TOKEN = "medily_verify_token";
+    const VERIFY_TOKEN =
+      process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN ||
+      'skillwithmedily_webhook_verify';
 
-  const mode = req.query["hub.mode"];
-  const token = req.query["hub.verify_token"];
-  const challenge = req.query["hub.challenge"];
+    console.log('==============================');
+    console.log('WHATSAPP WEBHOOK VERIFY');
+    console.log('MODE:', mode);
+    console.log('TOKEN:', token);
+    console.log('CHALLENGE:', challenge);
+    console.log('==============================');
 
-  console.log("MODE:", mode);
-  console.log("TOKEN:", token);
+    if (
+      mode === 'subscribe' &&
+      token === VERIFY_TOKEN
+    ) {
 
-  if (mode === "subscribe" && token === VERIFY_TOKEN) {
-    console.log("VERIFIED OK");
-    return res.status(200).send(challenge);
+      console.log('Webhook verified successfully');
+
+      return res
+        .status(200)
+        .send(challenge);
+
+    }
+
+    console.log('Webhook verification failed');
+
+    return res
+      .status(403)
+      .send('Forbidden');
+
+  } catch (error) {
+
+    console.error(
+      'Webhook verification error:',
+      error
+    );
+
+    return res
+      .status(500)
+      .send('Webhook verification failed');
+
   }
-
-  return res.status(403).send("Forbidden");
-
 };
 
-
-// =========================
-// RECEIVE WEBHOOK
-// =========================
+/**
+ * =========================================
+ * RECEIVE WHATSAPP EVENTS
+ * =========================================
+ */
 
 exports.receive = (req, res) => {
 
   try {
+
     sendOk(res);
+
   } catch (e) {
-    console.error("Webhook response error:", e);
+
+    console.error(
+      'Webhook response error:',
+      e
+    );
+
   }
 
   (async () => {
@@ -52,17 +98,25 @@ exports.receive = (req, res) => {
 
       const body = req.body;
 
-      if (!body || !body.entry) return;
+      if (!body || !body.entry) {
+        return;
+      }
 
       for (const entry of body.entry) {
 
-        if (!entry.changes) continue;
+        if (!entry.changes) {
+          continue;
+        }
 
         for (const change of entry.changes) {
 
           const val = change.value || {};
 
-          // STATUS UPDATES
+          /**
+           * =========================================
+           * STATUS UPDATES
+           * =========================================
+           */
 
           if (Array.isArray(val.statuses)) {
 
@@ -73,45 +127,71 @@ exports.receive = (req, res) => {
                 statusObj.message_id ||
                 statusObj.messageId;
 
-              if (!waId) continue;
+              if (!waId) {
+                continue;
+              }
 
               const msg = await Message.findOne({
                 wamid: waId,
               });
 
               const statusMap = {
-                sent:      'sent',
+                sent: 'sent',
                 delivered: 'delivered',
-                read:      'read',
-                failed:    'failed'
+                read: 'read',
+                failed: 'failed',
               };
 
-              const mappedStatus = statusMap[statusObj.status];
+              const mappedStatus =
+                statusMap[statusObj.status];
+
               if (mappedStatus && msg) {
+
                 msg.status = mappedStatus;
+
                 await msg.save();
-                console.log(`Message ${waId} → ${mappedStatus}`);
+
+                console.log(
+                  `Message ${waId} -> ${mappedStatus}`
+                );
+
               }
 
             }
 
           }
 
-          // INCOMING MESSAGE
+          /**
+           * =========================================
+           * INCOMING MESSAGES
+           * =========================================
+           */
 
           if (Array.isArray(val.messages)) {
 
             for (const message of val.messages) {
 
               const from = message.from;
+
               const text =
-                message.text?.body || "";
+                message.text?.body || '';
 
-              if (!from) continue;
+              if (!from) {
+                continue;
+              }
 
-              const upper = text.trim().toUpperCase();
+              const upper =
+                text.trim().toUpperCase();
 
-              if (OPT_OUT_KEYWORDS.includes(upper)) {
+              /**
+               * =========================================
+               * HANDLE OPT OUT
+               * =========================================
+               */
+
+              if (
+                OPT_OUT_KEYWORDS.includes(upper)
+              ) {
 
                 const contact =
                   await Contact.findOne({
@@ -119,13 +199,25 @@ exports.receive = (req, res) => {
                   });
 
                 if (contact) {
-                  contact.optInStatus = "opted_out";
+
+                  contact.optInStatus =
+                    'opted_out';
+
                   await contact.save();
+
+                  console.log(
+                    `Contact opted out: ${from}`
+                  );
+
                 }
 
               }
 
-              console.log("Incoming:", from, text);
+              console.log(
+                'Incoming message:',
+                from,
+                text
+              );
 
             }
 
@@ -137,7 +229,10 @@ exports.receive = (req, res) => {
 
     } catch (err) {
 
-      console.error("Webhook error:", err);
+      console.error(
+        'Webhook processing error:',
+        err
+      );
 
     }
 
