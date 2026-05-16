@@ -17,6 +17,8 @@ exports.createCampaign = async (req, res) => {
       description,
       templateId,
       contactListIds = [],
+      targetGroups = [],
+      targetTags = [],
       sendRate,
       varMap,
       scheduleNow,
@@ -54,7 +56,9 @@ exports.createCampaign = async (req, res) => {
       name,
       description,
       templateId,
-      contactListIds: Array.isArray(contactListIds) ? contactListIds : [],
+      contactListIds: Array.isArray(contactListIds) ? contactListIds.filter(id => mongoose.Types.ObjectId.isValid(id)) : [],
+      targetGroups: Array.isArray(targetGroups) ? targetGroups.filter(id => mongoose.Types.ObjectId.isValid(id)) : [],
+      targetTags: Array.isArray(targetTags) ? targetTags : [],
       status,
       scheduledAt,
       settings: campaignSettings,
@@ -67,10 +71,22 @@ exports.createCampaign = async (req, res) => {
     // if scheduleNow, enqueue jobs immediately (same behavior as launch)
     if (scheduleNow) {
       const lists = campaign.contactListIds || [];
+      const groups = campaign.targetGroups || [];
+      const tags = campaign.targetTags || [];
 
       const contactQuery = { organizationId: campaign.organizationId, optInStatus: 'opted_in' };
-      if (!(lists.length === 1 && lists[0] === 'all')) {
-        contactQuery.lists = { $in: lists };
+      
+      const orConditions = [];
+      if (lists.length) orConditions.push({ lists: { $in: lists } });
+      if (groups.length) orConditions.push({ groups: { $in: groups } });
+      if (tags.length) orConditions.push({ tags: { $in: tags } });
+
+      // If specific targets are provided, use $or
+      if (orConditions.length > 0) {
+        contactQuery.$or = orConditions;
+      } else if (req.body.selectAll !== true && !contactListIds.includes('all')) {
+         // If no targets provided AND "select all" is not true, default to no contacts
+         return sendResponse(res, true, { campaign }, 'Campaign created (no audience selected)', 201);
       }
 
       const contacts = await Contact.find(contactQuery).lean();
@@ -255,11 +271,22 @@ exports.launchCampaign = async (req, res) => {
     // Only draft or scheduled campaigns can be launched
     if (!['draft', 'scheduled'].includes(campaign.status)) return sendResponse(res, false, {}, 'Campaign cannot be launched in its current state', 400);
 
-    // fetch contacts from lists
+    // fetch contacts from lists/groups/tags
     const lists = campaign.contactListIds || [];
-    if (!lists.length) return sendResponse(res, false, {}, 'No contact lists attached to campaign', 400);
+    const groups = campaign.targetGroups || [];
+    const tags = campaign.targetTags || [];
 
-    const contacts = await Contact.find({ organizationId: campaign.organizationId, lists: { $in: lists }, optInStatus: 'opted_in' }).lean();
+    const contactQuery = { organizationId: campaign.organizationId, optInStatus: 'opted_in' };
+    const orConditions = [];
+    if (lists.length) orConditions.push({ lists: { $in: lists } });
+    if (groups.length) orConditions.push({ groups: { $in: groups } });
+    if (tags.length) orConditions.push({ tags: { $in: tags } });
+
+    if (orConditions.length > 0) {
+      contactQuery.$or = orConditions;
+    }
+
+    const contacts = await Contact.find(contactQuery).lean();
     if (!contacts.length) return sendResponse(res, false, {}, 'No opted-in contacts found for campaign', 400);
 
     // prepare shared queue for campaign messages

@@ -34,6 +34,8 @@ const CampaignSchema = new Schema(
     description: { type: String, default: '' },
     templateId: { type: Schema.Types.ObjectId, ref: 'Template' },
     contactListIds: [{ type: Schema.Types.ObjectId, ref: 'ContactList' }],
+    targetGroups: [{ type: Schema.Types.ObjectId, ref: 'ContactGroup' }],
+    targetTags: [{ type: String }],
     status: { type: String, enum: StatusEnum, default: 'draft' },
     scheduledAt: { type: Date, default: null },
     startedAt: { type: Date, default: null },
@@ -47,16 +49,27 @@ const CampaignSchema = new Schema(
 );
 
 // Ensure sendRate never exceeds 60 (additional safeguard)
-CampaignSchema.pre('validate', function (next) {
+// Ensure sendRate never exceeds 60 (additional safeguard)
+CampaignSchema.pre('validate', function () {
+
   if (this.settings && typeof this.settings.sendRate === 'number') {
+
     if (this.settings.sendRate > 60) {
-      this.invalidate('settings.sendRate', 'sendRate cannot exceed 60 messages per minute');
+      this.invalidate(
+        'settings.sendRate',
+        'sendRate cannot exceed 60 messages per minute'
+      );
     }
+
     if (this.settings.sendRate < 1) {
-      this.invalidate('settings.sendRate', 'sendRate must be at least 1');
+      this.invalidate(
+        'settings.sendRate',
+        'sendRate must be at least 1'
+      );
     }
+
   }
-  next();
+
 });
 
 // Indexes

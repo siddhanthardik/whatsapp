@@ -58,6 +58,13 @@ export const authAPI = {
   verify2fa: (payload) => api.post('/auth/verify-2fa', payload),
 }
 
+export const contactGroupsAPI = {
+  list: () => api.get('/contact-groups'),
+  create: (data) => api.post('/contact-groups', data),
+  update: (id, data) => api.put(`/contact-groups/${id}`, data),
+  delete: (id) => api.delete(`/contact-groups/${id}`)
+}
+
 export const contactsAPI = {
   list: (params) => api.get('/contacts', { params }),
   get: (id) => api.get(`/contacts/${id}`),
@@ -70,12 +77,18 @@ export const contactsAPI = {
     return api.post('/contacts/import', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
   },
 
-  // supports optional mapping object: contactsAPI.import(file, mapping)
-  importWithMapping: (file, mapping) => {
+  // supports optional mapping object, groupIds and tags
+  importWithMapping: (file, mapping, groupIds = [], tags = []) => {
     const fd = new FormData()
     fd.append('file', file)
     if (mapping && typeof mapping === 'object') {
       fd.append('mapping', JSON.stringify(mapping))
+    }
+    if (groupIds && groupIds.length > 0) {
+      fd.append('groupIds', JSON.stringify(groupIds))
+    }
+    if (tags && tags.length > 0) {
+      fd.append('tags', JSON.stringify(tags))
     }
     return api.post('/contacts/import', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
   },

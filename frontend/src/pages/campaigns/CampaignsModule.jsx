@@ -534,6 +534,9 @@ function CampaignWizard({ onBack, onLaunch }) {
     description:  "",
     templateId:   null,
     contactLists: [],
+    targetGroups: [],
+    targetTags: [],
+    selectAll: false,
     sendRate:     60,
     varMap:       {},
     scheduleNow:  true,
@@ -554,6 +557,8 @@ function CampaignWizard({ onBack, onLaunch }) {
   const [loadingContactFields, setLoadingContactFields] = useState(false);
   const [contactFieldsError, setContactFieldsError] = useState('');
 
+  const [contactGroups, setContactGroups] = useState([]);
+
   const [launchError, setLaunchError] = useState('');
 
   // templates, contact lists, and contact fields are fetched as the user moves through steps
@@ -561,12 +566,14 @@ function CampaignWizard({ onBack, onLaunch }) {
   // contact lists are returned from the API as groups: { id, name, count, optIn }
 
   const selectedTemplate = templates.find(t => (t.id && t.id === form.templateId) || (t._id && t._id === form.templateId) || (t.id && String(t.id) === String(form.templateId)) || (t._id && String(t._id) === String(form.templateId)));
-  const selectedLists    = contactLists.filter(l => form.contactLists.includes(l.id));
-  const totalContacts    = selectedLists.reduce((s, l) => s + (l.optIn || 0), 0);
+  const selectedLists    = contactLists.filter(l => form.contactLists.includes(l.id) || form.targetTags.includes(l.id));
+  const selectedGroups   = contactGroups.filter(g => form.targetGroups.includes(g._id || g.id));
+  
+  const totalContacts    = form.selectAll ? 'All' : (selectedLists.reduce((s, l) => s + (l.optIn || 0), 0) + selectedGroups.reduce((s, g) => s + (g.optIn || 0), 0));
 
   const canNext = () => {
     if (step === 1) return form.name.trim() && form.templateId;
-    if (step === 2) return form.contactLists.length > 0;
+    if (step === 2) return form.selectAll || form.targetGroups.length > 0 || form.targetTags.length > 0 || form.contactLists.length > 0;
     if (step === 3) return true;
     return true;
   };
@@ -578,7 +585,10 @@ function CampaignWizard({ onBack, onLaunch }) {
       const payload = {
         name: form.name,
         templateId: selectedTemplate ? (selectedTemplate._id || selectedTemplate.id || selectedTemplate) : null,
-        contactListIds: selectedLists.map(l => l.id),
+        contactListIds: form.contactLists,
+        targetGroups: form.targetGroups,
+        targetTags: form.targetTags,
+        selectAll: form.selectAll,
         sendRate: form.sendRate,
         varMap: form.varMap || {},
         scheduleNow: !!form.scheduleNow,
@@ -652,9 +662,15 @@ function CampaignWizard({ onBack, onLaunch }) {
       .catch(err => {
         console.error('contact lists error', err);
         setContactLists([]);
-        setContactListsError('Failed to load contact lists. Please try again.');
+        setContactListsError('Failed to load tags. Please try again.');
       })
       .finally(() => { if (mounted) setLoadingContactLists(false); });
+
+    api.get('/contact-groups').then(res => {
+      if (!mounted) return;
+      setContactGroups(res?.data?.data?.groups || []);
+    }).catch(console.error);
+
     return () => { mounted = false };
   }, [step]);
 
@@ -682,9 +698,24 @@ function CampaignWizard({ onBack, onLaunch }) {
   const toggleList = (id) => {
     setForm(f => ({
       ...f,
+      selectAll: false,
       contactLists: f.contactLists.includes(id)
         ? f.contactLists.filter(x => x !== id)
         : [...f.contactLists, id]
+    }));
+  };
+
+  const toggleSelectAll = () => setForm(f => ({ ...f, selectAll: !f.selectAll, targetGroups: [], targetTags: [], contactLists: [] }));
+  const toggleGroup = (id) => {
+    setForm(f => ({
+      ...f, selectAll: false,
+      targetGroups: f.targetGroups.includes(id) ? f.targetGroups.filter(x => x !== id) : [...f.targetGroups, id]
+    }));
+  };
+  const toggleTag = (id) => {
+    setForm(f => ({
+      ...f, selectAll: false,
+      targetTags: f.targetTags.includes(id) ? f.targetTags.filter(x => x !== id) : [...f.targetTags, id]
     }));
   };
 
@@ -870,63 +901,69 @@ function CampaignWizard({ onBack, onLaunch }) {
         {/* ── STEP 2: AUDIENCE ── */}
         {step === 2 && (
           <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
-            <div style={{ background:T.card, borderRadius:12, border:`1px solid ${T.border}`,
-              padding:"20px" }}>
-              <div style={{ fontSize:14, fontWeight:700, color:T.text, marginBottom:4 }}>
-                Select contact lists
-              </div>
-              <div style={{ fontSize:11, color:T.subtle, marginBottom:16 }}>
-                Only opted-in contacts will receive messages
-              </div>
+            <div style={{ background:T.card, borderRadius:12, border:`1px solid ${T.border}`, padding:"20px" }}>
+              <div style={{ fontSize:14, fontWeight:700, color:T.text, marginBottom:4 }}>Select contact audience</div>
+              <div style={{ fontSize:11, color:T.subtle, marginBottom:16 }}>Choose groups or tags to target. Only opted-in contacts will receive messages.</div>
+              
               <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                {/* Select All */}
+                <div role="button" tabIndex={0} onClick={toggleSelectAll} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggleSelectAll(); }}
+                  style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 14px", borderRadius:10, border:`2px solid ${form.selectAll ? T.blue : T.border}`, background: form.selectAll ? T.blueLight : T.card, cursor:"pointer", transition:"all .15s" }}>
+                  <div style={{ width:20, height:20, borderRadius:4, flexShrink:0, border:`2px solid ${form.selectAll ? T.blue : T.border}`, background: form.selectAll ? T.blue : T.card, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                    {form.selectAll && <span style={{ color:"#fff", fontSize:12, fontWeight:700 }}>✓</span>}
+                  </div>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:13, fontWeight:600, color: form.selectAll ? T.blue : T.text }}>All Contacts</div>
+                    <div style={{ fontSize:11, color:T.subtle }}>Send to all opted-in contacts</div>
+                  </div>
+                </div>
+
                 {loadingContactLists ? (
-                  <div style={{ padding:24, textAlign:'center' }}>Loading lists…</div>
-                ) : contactListsError ? (
-                  <div style={{ padding:24, textAlign:'center', color:T.red }}>{contactListsError}</div>
+                  <div style={{ padding:24, textAlign:'center' }}>Loading audience...</div>
                 ) : (
-                  contactLists.map(list => {
-                    const sel = form.contactLists.includes(list.id);
-                    const optPct = list.count > 0 ? Math.round((list.optIn / list.count) * 100) : 0;
-                    return (
-                      <div key={list.id} role="button" tabIndex={0}
-                        onClick={() => toggleList(list.id)}
-                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggleList(list.id); }}
-                        aria-pressed={sel}
-                        style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 14px",
-                          borderRadius:10, border:`2px solid ${sel ? T.green : T.border}`,
-                          background: sel ? T.greenLight : T.card, cursor:"pointer",
-                          transition:"all .15s" }}>
-                        <div style={{ width:20, height:20, borderRadius:4, flexShrink:0,
-                          border:`2px solid ${sel ? T.green : T.border}`,
-                          background: sel ? T.green : T.card, display:"flex",
-                          alignItems:"center", justifyContent:"center" }}>
-                          {sel && <span style={{ color:"#fff", fontSize:12, fontWeight:700 }}>✓</span>}
-                        </div>
-                        <div style={{ flex:1, minWidth:0 }}>
-                          <div style={{ fontSize:13, fontWeight:600,
-                            color: sel ? T.greenDark : T.text }}>{list.name}</div>
-                          <div style={{ fontSize:11, color:T.subtle }}>
-                            {list.optIn.toLocaleString()} opted-in
-                            <span style={{ color:T.border }}> · </span>
-                            {list.count.toLocaleString()} total
+                  <>
+                    {/* GROUPS */}
+                    {contactGroups.length > 0 && <div style={{ fontSize:12, fontWeight:600, color:T.muted, marginTop:10, marginBottom:4, textTransform:'uppercase' }}>Groups</div>}
+                    {contactGroups.map(g => {
+                      const id = g._id || g.id;
+                      const sel = form.targetGroups.includes(id);
+                      return (
+                        <div key={id} role="button" tabIndex={0} onClick={() => toggleGroup(id)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggleGroup(id); }}
+                          style={{ display:"flex", alignItems:"center", gap:12, padding:"10px 14px", borderRadius:10, border:`2px solid ${sel ? T.green : T.border}`, background: sel ? T.greenLight : T.card, cursor:"pointer", transition:"all .15s" }}>
+                          <div style={{ width:20, height:20, borderRadius:4, flexShrink:0, border:`2px solid ${sel ? T.green : T.border}`, background: sel ? T.green : T.card, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                            {sel && <span style={{ color:"#fff", fontSize:12, fontWeight:700 }}>✓</span>}
+                          </div>
+                          <div style={{ flex:1, minWidth:0 }}>
+                            <div style={{ fontSize:13, fontWeight:600, color: sel ? T.greenDark : T.text }}>{g.name}</div>
                           </div>
                         </div>
-                        <div style={{ textAlign:"right" }}>
-                          <div style={{ fontFamily:T.mono, fontSize:13, fontWeight:700,
-                            color: sel ? T.greenDark : T.muted }}>
-                            {optPct}%
+                      );
+                    })}
+
+                    {/* TAGS */}
+                    {contactLists.length > 0 && <div style={{ fontSize:12, fontWeight:600, color:T.muted, marginTop:10, marginBottom:4, textTransform:'uppercase' }}>Tags & Lists</div>}
+                    {contactLists.map(tag => {
+                      const sel = form.targetTags.includes(tag.id) || form.contactLists.includes(tag.id);
+                      return (
+                        <div key={tag.id} role="button" tabIndex={0} onClick={() => toggleTag(tag.id)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggleTag(tag.id); }}
+                          style={{ display:"flex", alignItems:"center", gap:12, padding:"10px 14px", borderRadius:10, border:`2px solid ${sel ? T.amber : T.border}`, background: sel ? T.amberLight : T.card, cursor:"pointer", transition:"all .15s" }}>
+                          <div style={{ width:20, height:20, borderRadius:4, flexShrink:0, border:`2px solid ${sel ? T.amber : T.border}`, background: sel ? T.amber : T.card, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                            {sel && <span style={{ color:"#fff", fontSize:12, fontWeight:700 }}>✓</span>}
                           </div>
-                          <div style={{ fontSize:9, color:T.subtle }}>opt-in rate</div>
+                          <div style={{ flex:1, minWidth:0 }}>
+                            <div style={{ fontSize:13, fontWeight:600, color: sel ? '#B45309' : T.text }}>{tag.name}</div>
+                            <div style={{ fontSize:11, color:T.subtle }}>{tag.optIn} opted-in</div>
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })
+                      );
+                    })}
+                  </>
                 )}
               </div>
             </div>
 
             {/* Summary + send rate */}
-            {form.contactLists.length > 0 && (
+            {(form.contactLists.length > 0 || form.targetGroups.length > 0 || form.targetTags.length > 0 || form.selectAll) && (
               <div style={{ background:T.card, borderRadius:12, border:`1px solid ${T.border}`,
                 padding:"20px" }}>
                 <div style={{ display:"flex", justifyContent:"space-between",
@@ -963,20 +1000,19 @@ function CampaignWizard({ onBack, onLaunch }) {
                     fontSize:12, marginBottom:6 }}>
                     <span style={{ color:T.muted }}>Total recipients</span>
                     <span style={{ fontFamily:T.mono, fontWeight:700, color:T.text }}>
-                      {totalContacts.toLocaleString()}
+                      {typeof totalContacts === 'number' ? totalContacts.toLocaleString() : totalContacts}
                     </span>
                   </div>
-                  <div style={{ display:"flex", justifyContent:"space-between",
-                    fontSize:12, marginBottom:6 }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, marginBottom:6 }}>
                     <span style={{ color:T.muted }}>Estimated time</span>
                     <span style={{ fontFamily:T.mono, fontWeight:700, color:T.text }}>
-                      ~{Math.ceil(totalContacts / form.sendRate)} min
+                      {typeof totalContacts === 'number' ? `~${Math.ceil(totalContacts / form.sendRate)} min` : "Depends on audience size"}
                     </span>
                   </div>
                   <div style={{ display:"flex", justifyContent:"space-between", fontSize:12 }}>
-                    <span style={{ color:T.muted }}>Lists selected</span>
+                    <span style={{ color:T.muted }}>Segments selected</span>
                     <span style={{ fontWeight:600, color:T.text }}>
-                      {form.contactLists.length}
+                      {form.selectAll ? 'All Contacts' : (form.contactLists.length + form.targetGroups.length + form.targetTags.length)}
                     </span>
                   </div>
                 </div>

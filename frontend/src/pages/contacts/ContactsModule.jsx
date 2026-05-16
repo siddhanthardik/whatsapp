@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from "react";
-import { contactsAPI } from "../../services/api";
+import { contactsAPI, contactGroupsAPI } from "../../services/api";
 import { toast } from 'react-hot-toast';
 
 /* ─────────────────────────────────────────────
@@ -730,6 +730,54 @@ function ImportScreen({ onBack }) {
   const [csvPreview, setCsvPreview] = useState(CSV_PREVIEW);
   const [parseError, setParseError] = useState(null);
 
+  const [groups, setGroups] = useState([]);
+  const [selectedGroupId, setSelectedGroupId] = useState("");
+  const [inputTags, setInputTags] = useState("");
+
+  const [showCreateGroup, setShowCreateGroup] = useState(false);
+  const [newGroupName, setNewGroupName] = useState("");
+  const [newGroupDesc, setNewGroupDesc] = useState("");
+  const [newGroupColor, setNewGroupColor] = useState("#10B981");
+  const [creatingGroup, setCreatingGroup] = useState(false);
+
+  useEffect(() => {
+    contactGroupsAPI.list().then(res => {
+      if (res?.data?.success) setGroups(res.data.data.groups);
+    }).catch(console.error);
+  }, []);
+
+  const handleGroupSelect = (e) => {
+    if (e.target.value === "CREATE_NEW") {
+      setShowCreateGroup(true);
+    } else {
+      setSelectedGroupId(e.target.value);
+    }
+  };
+
+  const handleCreateGroup = async () => {
+    if (!newGroupName.trim()) return toast.error("Group name is required");
+    setCreatingGroup(true);
+    try {
+      const res = await contactGroupsAPI.create({ name: newGroupName, description: newGroupDesc, color: newGroupColor });
+      if (res?.data?.success) {
+        const created = res.data.data.group;
+        setGroups(prev => [...prev, created].sort((a,b)=>a.name.localeCompare(b.name)));
+        setSelectedGroupId(created._id || created.id);
+        setShowCreateGroup(false);
+        setNewGroupName("");
+        setNewGroupDesc("");
+        setNewGroupColor("#10B981");
+        toast.success("Group created successfully");
+      } else {
+        toast.error("Failed to create group");
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Error creating group");
+    } finally {
+      setCreatingGroup(false);
+    }
+  };
+
   const fieldOptions = ["skip","Name","Phone","Email","Tag","City","Custom Field 1","Custom Field 2"];
 
   // Lightweight CSV parser
@@ -797,7 +845,9 @@ function ImportScreen({ onBack }) {
     setStep(3); setImporting(true); setProgress(8);
     try {
       setProgress(35);
-      const res = await contactsAPI.importWithMapping(file, mapping);
+      const groupIds = selectedGroupId ? [selectedGroupId] : [];
+      const tags = inputTags.split(',').map(t => t.trim()).filter(Boolean);
+      const res = await contactsAPI.importWithMapping(file, mapping, groupIds, tags);
       setProgress(90);
       if (res?.data?.success) {
         const { imported = 0, duplicates = 0, invalidRows = [], errors = [] } = res.data.data;
@@ -981,6 +1031,31 @@ function ImportScreen({ onBack }) {
               </div>
             </div>
 
+            {/* ASSIGN GROUP & TAGS */}
+            <div style={{ background:T.card, borderRadius:12, border:`1px solid ${T.border}`, padding:"20px", marginBottom:20 }}>
+              <div style={{ fontSize:14, fontWeight:700, color:T.text, marginBottom:16 }}>Assign to Group & Tags</div>
+              <div style={{ display:"flex", gap:20, flexWrap:"wrap" }}>
+                <div style={{ flex:1, minWidth:200 }}>
+                  <label style={{ display:"block", fontSize:12, color:T.muted, marginBottom:6, fontWeight:600 }}>Contact Group (Optional)</label>
+                  <select value={selectedGroupId} onChange={handleGroupSelect}
+                    style={{ width:"100%", padding:"10px 12px", borderRadius:8, border:`1px solid ${T.border}`, fontSize:13, outline:"none" }}>
+                    <option value="">— Select a group —</option>
+                    <optgroup label="Existing Groups">
+                      {groups.map(g => <option key={g._id || g.id} value={g._id || g.id}>{g.name}</option>)}
+                    </optgroup>
+                    <optgroup label="Actions">
+                      <option value="CREATE_NEW">+ Create New Group</option>
+                    </optgroup>
+                  </select>
+                </div>
+                <div style={{ flex:1, minWidth:200 }}>
+                  <label style={{ display:"block", fontSize:12, color:T.muted, marginBottom:6, fontWeight:600 }}>Tags (comma separated)</label>
+                  <input type="text" value={inputTags} onChange={e=>setInputTags(e.target.value)} placeholder="e.g. Festival, VIP"
+                    style={{ width:"100%", padding:"10px 12px", borderRadius:8, border:`1px solid ${T.border}`, fontSize:13, outline:"none", boxSizing:"border-box" }} />
+                </div>
+              </div>
+            </div>
+
             <div style={{ display:"flex", gap:10, justifyContent:"space-between", alignItems:"center" }}>
               <div style={{ fontSize:12, color:T.muted }}>
                 <strong style={{ color:T.text }}>{csvPreview.length}</strong> valid contacts ready · <strong style={{ color:T.amber }}>0</strong> duplicates found
@@ -990,6 +1065,44 @@ function ImportScreen({ onBack }) {
                 <button onClick={startImport} style={{ padding:"9px 18px", borderRadius:8, border:"none", background:T.green, color:"#fff", fontSize:13, fontWeight:600, cursor:"pointer" }}>Start Import →</button>
               </div>
             </div>
+
+            {/* CREATE GROUP MODAL */}
+            {showCreateGroup && (
+              <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:999, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                <div style={{ background:T.card, width:400, borderRadius:16, boxShadow:"0 20px 40px rgba(0,0,0,0.2)", overflow:"hidden", animation:"slideUp 0.3s ease" }}>
+                  <div style={{ padding:"16px 24px", borderBottom:`1px solid ${T.border}`, display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                    <h3 style={{ margin:0, fontSize:16, fontWeight:700, color:T.text }}>Create New Group</h3>
+                    <button onClick={()=>{ setShowCreateGroup(false); setSelectedGroupId(""); }} style={{ border:"none", background:"transparent", cursor:"pointer", color:T.muted, fontSize:20 }}>&times;</button>
+                  </div>
+                  <div style={{ padding:"24px", display:"flex", flexDirection:"column", gap:16 }}>
+                    <div>
+                      <label style={{ display:"block", fontSize:12, color:T.muted, marginBottom:6, fontWeight:600 }}>Group Name *</label>
+                      <input type="text" value={newGroupName} onChange={e=>setNewGroupName(e.target.value)} placeholder="e.g. VIP Clients"
+                        style={{ width:"100%", padding:"10px 12px", borderRadius:8, border:`1px solid ${T.border}`, fontSize:13, outline:"none", boxSizing:"border-box" }} autoFocus />
+                    </div>
+                    <div>
+                      <label style={{ display:"block", fontSize:12, color:T.muted, marginBottom:6, fontWeight:600 }}>Description (Optional)</label>
+                      <input type="text" value={newGroupDesc} onChange={e=>setNewGroupDesc(e.target.value)} placeholder="Brief description..."
+                        style={{ width:"100%", padding:"10px 12px", borderRadius:8, border:`1px solid ${T.border}`, fontSize:13, outline:"none", boxSizing:"border-box" }} />
+                    </div>
+                    <div>
+                      <label style={{ display:"block", fontSize:12, color:T.muted, marginBottom:6, fontWeight:600 }}>Color Label</label>
+                      <div style={{ display:"flex", gap:8 }}>
+                        {["#10B981", "#3B82F6", "#8B5CF6", "#F59E0B", "#EF4444", "#64748B"].map(c => (
+                          <div key={c} onClick={()=>setNewGroupColor(c)} style={{ width:24, height:24, borderRadius:"50%", background:c, cursor:"pointer", border:`2px solid ${newGroupColor===c ? T.sidebar : "transparent"}` }} />
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ padding:"16px 24px", borderTop:`1px solid ${T.border}`, background:T.bg, display:"flex", justifyContent:"flex-end", gap:12 }}>
+                    <button onClick={()=>{ setShowCreateGroup(false); setSelectedGroupId(""); }} style={{ padding:"8px 16px", borderRadius:8, border:`1px solid ${T.border}`, background:T.card, fontSize:13, color:T.text, cursor:"pointer" }}>Cancel</button>
+                    <button onClick={handleCreateGroup} disabled={creatingGroup} style={{ padding:"8px 16px", borderRadius:8, border:"none", background:T.blue, color:"#fff", fontSize:13, fontWeight:600, cursor:creatingGroup?"not-allowed":"pointer" }}>
+                      {creatingGroup ? "Creating..." : "Create Group"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 

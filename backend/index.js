@@ -14,6 +14,7 @@ const usersRoutes = require('./src/routes/users');
 const campaignsRoutes = require('./src/routes/campaigns');
 const messagesRoutes = require('./src/routes/messages');
 const contactsRoutes = require('./src/routes/contacts');
+const contactGroupsRoutes = require('./src/routes/contactGroups');
 const templatesRoutes = require('./src/routes/templates');
 const analyticsRoutes = require('./src/routes/analytics');
 const webhooksRoutes = require('./src/routes/webhooks');
@@ -22,7 +23,6 @@ const optRoutes = require('./src/routes/opt');
 const reportsRoutes = require('./src/routes/reports');
 const organizationRoutes = require('./src/routes/organization');
 const organizationsRoutes = require('./src/routes/organizations');
-
 const app = express();
 
 
@@ -79,6 +79,7 @@ app.use("/api/users", usersRoutes);
 app.use("/api/campaigns", campaignsRoutes);
 app.use("/api/messages", messagesRoutes);
 app.use("/api/contacts", contactsRoutes);
+app.use("/api/contact-groups", contactGroupsRoutes);
 app.use("/api/templates", templatesRoutes);
 app.use("/api/analytics", analyticsRoutes);
 app.use("/api/webhooks", webhooksRoutes);

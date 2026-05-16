@@ -45,13 +45,21 @@ exports.importContacts = async (req, res) => {
 
     // allow client-provided mapping (file header -> target field)
     let clientMapping = null;
+    let reqGroups = [];
+    let reqTags = [];
     try {
       if (req.body && req.body.mapping) {
         clientMapping = typeof req.body.mapping === 'string' ? JSON.parse(req.body.mapping) : req.body.mapping;
         console.log('[importContacts] Received mapping:', clientMapping);
       }
+      if (req.body && req.body.groupIds) {
+        reqGroups = typeof req.body.groupIds === 'string' ? JSON.parse(req.body.groupIds) : req.body.groupIds;
+      }
+      if (req.body && req.body.tags) {
+        reqTags = typeof req.body.tags === 'string' ? JSON.parse(req.body.tags) : req.body.tags;
+      }
     } catch (e) {
-      clientMapping = null;
+      console.error('[importContacts] Error parsing req.body JSON fields:', e);
     }
 
     // normalized rows
@@ -131,7 +139,8 @@ exports.importContacts = async (req, res) => {
         phoneNumber: normalizedPhone,
         name: r.name || undefined,
         email: r.email || undefined,
-        tags: r.tags || [],
+        tags: Array.from(new Set([...(r.tags || []), ...reqTags])),
+        groups: reqGroups,
         customFields: r.raw || {},
         organizationId: orgId,
         optInStatus: 'opted_in',
@@ -148,7 +157,8 @@ exports.importContacts = async (req, res) => {
     const existingSet = new Set(existing.map(e => e.phoneNumber));
 
     const toInsert = docs.filter(d => !existingSet.has(d.phoneNumber));
-    const duplicates = docs.filter(d => existingSet.has(d.phoneNumber)).map(d => d.phoneNumber);
+    const duplicateDocs = docs.filter(d => existingSet.has(d.phoneNumber));
+    const duplicates = duplicateDocs.map(d => d.phoneNumber);
 
     const errors = [];
     let inserted = [];
@@ -165,6 +175,28 @@ exports.importContacts = async (req, res) => {
         } else if (e && e.message) {
           errors.push({ errmsg: e.message });
         }
+      }
+    }
+
+    if (duplicateDocs.length) {
+      try {
+        const bulkOps = duplicateDocs.map(d => {
+          const updateFields = {};
+          if (d.name) updateFields.name = d.name;
+          if (d.email) updateFields.email = d.email;
+          return {
+            updateOne: {
+              filter: { phoneNumber: d.phoneNumber, organizationId: orgId },
+              update: {
+                $addToSet: { tags: { $each: d.tags }, groups: { $each: d.groups } },
+                ...(Object.keys(updateFields).length > 0 ? { $set: updateFields } : {})
+              }
+            }
+          };
+        });
+        await Contact.bulkWrite(bulkOps, { ordered: false });
+      } catch (err) {
+        console.error('bulkWrite error for duplicates:', err);
       }
     }
 
