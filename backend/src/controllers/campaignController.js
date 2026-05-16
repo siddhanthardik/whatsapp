@@ -78,13 +78,12 @@ exports.createCampaign = async (req, res) => {
       
       const orConditions = [];
       if (lists.length) orConditions.push({ lists: { $in: lists } });
-      if (groups.length) orConditions.push({ groups: { $in: groups } });
+      if (groups.length) orConditions.push({ groupIds: { $in: groups } });
       if (tags.length) orConditions.push({ tags: { $in: tags } });
 
-      // If specific targets are provided, use $or
       if (orConditions.length > 0) {
         contactQuery.$or = orConditions;
-      } else if (req.body.selectAll !== true && !contactListIds.includes('all')) {
+      } else if (req.body.selectAll !== true && (!contactListIds || !contactListIds.includes('all'))) {
          // If no targets provided AND "select all" is not true, default to no contacts
          return sendResponse(res, true, { campaign }, 'Campaign created (no audience selected)', 201);
       }
@@ -279,7 +278,7 @@ exports.launchCampaign = async (req, res) => {
     const contactQuery = { organizationId: campaign.organizationId, optInStatus: 'opted_in' };
     const orConditions = [];
     if (lists.length) orConditions.push({ lists: { $in: lists } });
-    if (groups.length) orConditions.push({ groups: { $in: groups } });
+    if (groups.length) orConditions.push({ groupIds: { $in: groups } });
     if (tags.length) orConditions.push({ tags: { $in: tags } });
 
     if (orConditions.length > 0) {

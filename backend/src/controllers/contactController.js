@@ -53,7 +53,10 @@ exports.importContacts = async (req, res) => {
         console.log('[importContacts] Received mapping:', clientMapping);
       }
       if (req.body && req.body.groupIds) {
-        reqGroups = typeof req.body.groupIds === 'string' ? JSON.parse(req.body.groupIds) : req.body.groupIds;
+        const rawGroups = typeof req.body.groupIds === 'string' ? JSON.parse(req.body.groupIds) : req.body.groupIds;
+        reqGroups = Array.isArray(rawGroups) 
+          ? rawGroups.filter(id => mongoose.Types.ObjectId.isValid(id)).map(id => new mongoose.Types.ObjectId(id))
+          : [];
       }
       if (req.body && req.body.tags) {
         reqTags = typeof req.body.tags === 'string' ? JSON.parse(req.body.tags) : req.body.tags;
@@ -140,7 +143,7 @@ exports.importContacts = async (req, res) => {
         name: r.name || undefined,
         email: r.email || undefined,
         tags: Array.from(new Set([...(r.tags || []), ...reqTags])),
-        groups: reqGroups,
+        groupIds: reqGroups,
         customFields: r.raw || {},
         organizationId: orgId,
         optInStatus: 'opted_in',
@@ -188,7 +191,7 @@ exports.importContacts = async (req, res) => {
             updateOne: {
               filter: { phoneNumber: d.phoneNumber, organizationId: orgId },
               update: {
-                $addToSet: { tags: { $each: d.tags }, groups: { $each: d.groups } },
+                $addToSet: { tags: { $each: d.tags }, groupIds: { $each: d.groupIds } },
                 ...(Object.keys(updateFields).length > 0 ? { $set: updateFields } : {})
               }
             }
@@ -213,7 +216,7 @@ exports.createContact = async (req, res) => {
     const user = req.user;
     if (!user) return sendResponse(res, false, {}, 'Authentication required', 401);
 
-    const { phoneNumber, name, email, customFields, tags = [], lists } = req.body;
+    const { phoneNumber, name, email, customFields, tags = [], groupIds = [], lists } = req.body;
     const normalizedPhone = normalizePhone(phoneNumber);
     if (!normalizedPhone) return sendResponse(res, false, {}, 'Invalid phone number (E.164 required)', 400);
     // resolve organizationId
@@ -233,6 +236,7 @@ exports.createContact = async (req, res) => {
       email,
       customFields: customFields || {},
       tags: Array.isArray(tags) ? tags : [tags],
+      groupIds: (Array.isArray(groupIds) ? groupIds : [groupIds]).filter(id => mongoose.Types.ObjectId.isValid(id)).map(id => new mongoose.Types.ObjectId(id)),
       lists: lists || [],
       organizationId: orgId,
       optInStatus: 'opted_in',
@@ -261,7 +265,7 @@ exports.updateContact = async (req, res) => {
       return sendResponse(res, false, {}, 'Forbidden: organization access denied', 403);
     }
 
-    const updatable = ['name', 'email', 'customFields', 'tags', 'lists', 'optInStatus', 'optInTimestamp', 'optOutTimestamp', 'optOutReason', 'isBlocked'];
+    const updatable = ['name', 'email', 'customFields', 'tags', 'groupIds', 'lists', 'optInStatus', 'optInTimestamp', 'optOutTimestamp', 'optOutReason', 'isBlocked'];
     updatable.forEach((key) => {
       if (typeof req.body[key] !== 'undefined') contact[key] = req.body[key];
     });
@@ -327,7 +331,6 @@ exports.getContacts = async (req, res) => {
     const contacts = await Contact.find(query).limit(200).lean();
     return res.status(200).json(contacts || []);
   } catch (err) {
-    console.error('getContacts error:', err);
     return sendResponse(res, false, {}, 'Failed to retrieve contacts', 500);
   }
 };

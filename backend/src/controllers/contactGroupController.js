@@ -115,8 +115,8 @@ exports.deleteContactGroup = async (req, res) => {
     // Also remove this group from any contacts
     const Contact = require('../models/Contact');
     await Contact.updateMany(
-      { groups: id },
-      { $pull: { groups: id } }
+      { groupIds: id },
+      { $pull: { groupIds: id } }
     );
 
     return sendResponse(res, true, {}, 'Contact group deleted');
