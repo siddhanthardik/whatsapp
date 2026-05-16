@@ -2,7 +2,7 @@ import axios from 'axios'
 import { toast } from 'react-hot-toast'
 import useAuthStore from '../store/authStore'
 
-const BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
+const BASE = import.meta.env.VITE_API_URL || '/api'
 
 const api = axios.create({
   baseURL: BASE,
@@ -33,7 +33,7 @@ api.interceptors.response.use(
     if (status === 401) {
       try {
         useAuthStore.getState().clearAuth()
-      } catch (e) {}
+      } catch (e) { }
       // client-side redirect to login
       window.location.href = '/login'
       return Promise.reject(err)

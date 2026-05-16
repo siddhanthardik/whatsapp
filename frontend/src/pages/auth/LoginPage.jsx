@@ -3,7 +3,7 @@ import { useForm } from 'react-hook-form'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { FiEye, FiEyeOff } from 'react-icons/fi'
-import { authAPI } from '../../services/api'
+import api, { authAPI } from '../../services/api'
 import useAuthStore from '../../store/authStore'
 
 export default function LoginPage() {
@@ -17,25 +17,38 @@ export default function LoginPage() {
   const [twoFactorToken, setTwoFactorToken] = useState('')
 
   async function onSubmit(formData) {
+    console.log('FORM_SUBMITTED', formData)
     setLoading(true)
     try {
-      const res = await authAPI.login(formData)
-      const payload = res?.data || res
-      const body = payload.data || payload
-
-      if (body?.twoFactorRequired) {
+      // Using the stable api instance directly as requested
+      const res = await api.post('/auth/login', formData)
+      
+      // Handle different response structures
+      const data = res.data?.data || res.data || res
+      
+      if (data?.twoFactorRequired) {
         setTwoFactorRequired(true)
         toast.success('Two-factor authentication required')
         return
       }
 
-      const user = body?.user || body?.profile || body
-      const token = body?.accessToken || body?.token || body?.access_token
-      if (!token) throw new Error('No token returned')
+      const user = data?.user || data?.profile || data
+      const token = data?.accessToken || data?.token || data?.access_token
+      
+      if (!token) {
+        throw new Error('Login successful but no token received')
+      }
 
+      // Store in Zustand store (which handles localStorage JSON)
       setAuth(user, token)
+      
+      // Also store token directly in localStorage as requested
+      localStorage.setItem('token', token)
+      
+      toast.success('Login successful!')
       navigate('/dashboard')
     } catch (err) {
+      console.error('LOGIN_ERROR', err)
       const msg = err?.response?.data?.message || err?.message || 'Login failed'
       toast.error(msg)
     } finally {
