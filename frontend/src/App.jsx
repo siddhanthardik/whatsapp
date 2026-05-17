@@ -28,6 +28,7 @@ import {
   ProfilePage,
   SuperAdminPage,
   SystemHealthPage,
+  DeliveryInspectorPage,
 } from './pages'
 
 function PrivateRoute({ children }) {
@@ -89,6 +90,7 @@ export default function App() {
             <Route path="/profile" element={<ErrorBoundary><ProfilePage /></ErrorBoundary>} />
             <Route path="/super-admin" element={<SuperAdminPage />} />
             <Route path="/platform-admin/system-health" element={<SystemHealthPage />} />
+            <Route path="/admin/delivery" element={<DeliveryInspectorPage />} />
           </Route>
 
           <Route path="*" element={<div>Not Found</div>} />

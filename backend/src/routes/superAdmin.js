@@ -238,4 +238,56 @@ function mongooseConnectionState() {
   return states[mongoose.connection.readyState] || 'unknown';
 }
 
+// GET /api/super-admin/delivery
+router.get('/delivery', verifyToken, requireRole('super_admin'), async (req, res) => {
+  try {
+    const { page = 1, limit = 50, status, wamid, search } = req.query;
+    const skip = (Math.max(Number(page), 1) - 1) * Math.max(Number(limit), 1);
+
+    const filter = {};
+    if (status) filter.status = status;
+    if (wamid) filter.wamid = wamid;
+    if (search) filter.to = { $regex: search, $options: 'i' };
+
+    const messages = await Message.find(filter)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(Number(limit))
+      .populate('organizationId', 'name')
+      .populate('campaignId', 'name')
+      .lean();
+
+    const total = await Message.countDocuments(filter);
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        messages: messages.map(m => ({
+          id: m._id,
+          to: m.to,
+          type: m.type,
+          status: m.status,
+          wamid: m.wamid,
+          retries: m.retries,
+          errorDetails: m.errorDetails,
+          metaResponse: m.metaResponse,
+          webhookPayloads: m.webhookPayloads,
+          organizationName: m.organizationId?.name || 'Unknown',
+          campaignName: m.campaignId?.name || 'Direct/Unknown',
+          createdAt: m.createdAt,
+          updatedAt: m.updatedAt
+        })),
+        meta: {
+          total,
+          page: Number(page),
+          limit: Number(limit)
+        }
+      }
+    });
+  } catch (err) {
+    console.error('GET delivery inspector failed:', err);
+    return res.status(500).json({ success: false, message: 'Internal Server Error' });
+  }
+});
+
 module.exports = router;

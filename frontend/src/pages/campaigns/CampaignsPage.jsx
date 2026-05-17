@@ -125,10 +125,16 @@ export default function CampaignsPage() {
             </thead>
             <tbody>
               {filtered.map((c, i) => {
-                const liveSent = getLiveSent(c)
-                const delivery = pct(c.delivered ?? 0, liveSent)
-                const openRate = pct(c.read ?? 0, liveSent)
-                const progressPct = Math.min(100, pct(liveSent, c.total || 1))
+                const s = c.stats || {}
+                const totalTarget = s.totalContacts || c.total || 0
+                const sent = s.sent || 0
+                const delivered = s.delivered || 0
+                const read = s.read || 0
+                const failed = s.failed || 0
+
+                const deliveryPct = pct(delivered, sent)
+                const openRatePct = pct(read, sent)
+                const progressPct = Math.min(100, pct(sent, totalTarget || 1))
                 const progColor = getProgressColor(c.status)
                 const isScheduled = c.status === 'scheduled'
                 const isDraft = c.status === 'draft'
@@ -153,19 +159,38 @@ export default function CampaignsPage() {
                       {isDraft ? (
                         <div style={{ color: '#94A3B8', fontSize: 14 }}>—</div>
                       ) : isScheduled ? (
-                        <div style={{ color: '#64748B', fontSize: 14 }}>{Number(c.total || 0).toLocaleString()} contacts</div>
+                        <div style={{ color: '#64748B', fontSize: 14 }}>{Number(totalTarget).toLocaleString()} contacts</div>
                       ) : (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', fontSize: 13 }}>
                             <div>
-                              <span style={{ fontWeight: 700, color: '#0F172A' }}>{Number(liveSent).toLocaleString()}</span>
-                              <span style={{ color: '#94A3B8' }}> / {Number(c.total || 1).toLocaleString()}</span>
+                              <span style={{ fontWeight: 700, color: '#0F172A' }}>{Number(sent).toLocaleString()}</span>
+                              <span style={{ color: '#94A3B8' }}> / {Number(totalTarget).toLocaleString()}</span>
                             </div>
                             <span style={{ fontWeight: 700, color: progColor }}>{progressPct}%</span>
                           </div>
                           <div style={{ height: 4, background: '#E2E8F0', borderRadius: 4, overflow: 'hidden' }}>
                             <div style={{ width: `${progressPct}%`, height: '100%', background: progColor, borderRadius: 4 }} />
                           </div>
+                          {failed > 0 && (
+                            <button 
+                              onClick={async (e) => { 
+                                e.preventDefault(); 
+                                e.stopPropagation();
+                                try {
+                                  await fetch(`/api/campaigns/${c.id}/retry`, { method: 'POST', headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }});
+                                  // The polling will pick up the changes
+                                } catch (err) {}
+                              }}
+                              style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', borderRadius: 4, border: '1px solid #FCA5A5', background: '#FEF2F2', color: '#DC2626', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}
+                            >
+                              <svg width="10" height="10" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                                <polyline points="1 4 1 10 7 10"></polyline>
+                                <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+                              </svg>
+                              Retry {failed} failed
+                            </button>
+                          )}
                         </div>
                       )}
                     </td>
@@ -173,7 +198,10 @@ export default function CampaignsPage() {
                       {isDraft || isScheduled ? (
                         <div style={{ color: '#94A3B8' }}>—</div>
                       ) : (
-                        <div style={{ fontWeight: 700, fontSize: 14, color: getDeliveryColor(delivery) }}>{delivery}%</div>
+                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                          <div style={{ fontWeight: 700, fontSize: 14, color: getDeliveryColor(deliveryPct) }}>{deliveryPct}%</div>
+                          <div style={{ fontSize: 11, color: '#94A3B8' }}>{delivered.toLocaleString()} / {sent.toLocaleString()}</div>
+                        </div>
                       )}
                     </td>
                     <td style={{ padding: '20px 24px', width: '15%' }}>
@@ -181,9 +209,12 @@ export default function CampaignsPage() {
                         <div style={{ color: '#94A3B8' }}>—</div>
                       ) : (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <span style={{ fontWeight: 700, fontSize: 14, color: '#0F172A' }}>{openRate}%</span>
+                          <div style={{ display: 'flex', flexDirection: 'column' }}>
+                            <span style={{ fontWeight: 700, fontSize: 14, color: '#0F172A' }}>{openRatePct}%</span>
+                            <span style={{ fontSize: 11, color: '#94A3B8' }}>{read.toLocaleString()} / {sent.toLocaleString()}</span>
+                          </div>
                           <div style={{ width: 14, height: 4, background: '#E2E8F0', borderRadius: 2 }}>
-                            <div style={{ width: `${openRate}%`, height: '100%', background: '#8B5CF6', borderRadius: 2 }} />
+                            <div style={{ width: `${openRatePct}%`, height: '100%', background: '#8B5CF6', borderRadius: 2 }} />
                           </div>
                         </div>
                       )}

@@ -61,4 +61,7 @@ router.put(
 // DELETE /api/templates/:id
 router.delete('/:id', verifyToken, requireRole('manager', 'admin', 'owner', 'super_admin'), templateController.deleteTemplate);
 
+// POST /api/templates/sync - fetch and sync templates from Meta
+router.post('/sync', verifyToken, requireRole('manager', 'admin', 'owner', 'super_admin'), templateController.syncFromWhatsApp);
+
 module.exports = router;

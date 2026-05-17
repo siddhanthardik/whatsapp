@@ -173,6 +173,7 @@ export const superAdminAPI = {
   systemHealth: () => api.get('/super-admin/system-health'),
   logs: (params) => api.get('/super-admin/logs', { params }),
   resolveLog: (id, notes) => api.put(`/super-admin/logs/${id}/resolve`, { notes }),
+  delivery: (params) => api.get('/super-admin/delivery', { params }),
 }
 
 export default api

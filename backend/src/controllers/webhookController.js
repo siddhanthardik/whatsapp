@@ -146,15 +146,42 @@ exports.receive = (req, res) => {
                 statusMap[statusObj.status];
 
               if (mappedStatus && msg) {
+                // Prevent duplicate metric increments by checking if the status is already this or higher
+                const statusOrder = { pending: 1, sent: 2, delivered: 3, read: 4, failed: 5 };
+                const currentOrder = statusOrder[msg.status] || 0;
+                const newOrder = statusOrder[mappedStatus] || 0;
 
-                msg.status = mappedStatus;
+                // Push raw payload
+                if (!msg.webhookPayloads) msg.webhookPayloads = [];
+                msg.webhookPayloads.push(statusObj);
 
-                await msg.save();
+                if (newOrder > currentOrder || mappedStatus === 'failed') {
+                  msg.status = mappedStatus;
+                  
+                  if (mappedStatus === 'failed' && statusObj.errors && statusObj.errors.length > 0) {
+                    msg.errorDetails = statusObj.errors[0].message || statusObj.errors[0].title;
+                  }
 
-                console.log(
-                  `Message ${waId} -> ${mappedStatus}`
-                );
+                  await msg.save();
 
+                  // Update Campaign Stats securely
+                  if (msg.campaignId) {
+                    const incObj = {};
+                    if (mappedStatus === 'delivered') incObj['stats.delivered'] = 1;
+                    if (mappedStatus === 'read') incObj['stats.read'] = 1;
+                    if (mappedStatus === 'failed') incObj['stats.failed'] = 1;
+                    // Note: 'sent' is usually incremented by the worker at dispatch, not here, to avoid double counting
+
+                    if (Object.keys(incObj).length > 0) {
+                      await Campaign.findByIdAndUpdate(msg.campaignId, { $inc: incObj }, { new: true });
+                    }
+                  }
+
+                  console.log(`Message ${waId} -> ${mappedStatus} (Campaign metric updated)`);
+                } else {
+                  await msg.save(); // just save the webhook payload
+                  console.log(`Message ${waId} webhook saved, status remained ${msg.status}`);
+                }
               }
 
             }

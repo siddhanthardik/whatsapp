@@ -273,28 +273,50 @@ function CampaignsList({ onNew, onView }) {
   const [hoverRow, setHoverRow]         = useState(null);
   const [confirmCancel, setConfirmCancel] = useState(null);
 
-  // Simulated live tick for running campaigns
-  const [tick, setTick] = useState(0);
-  useEffect(() => {
-    const iv = setInterval(() => setTick(t => t + 1), 4000);
-    return () => clearInterval(iv);
+  const [campaigns, setCampaigns]       = useState([]);
+  const [loading, setLoading]           = useState(true);
+
+  // Realtime Polling every 10 seconds
+  const fetchCampaigns = useCallback(async () => {
+    try {
+      const res = await campaignsAPI.list({ limit: 100 });
+      if (res.data?.success) {
+        setCampaigns(res.data.data.campaigns || []);
+      }
+    } catch (err) {
+      console.error('Failed to fetch campaigns for polling:', err);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  // Fake progress increment on tick
-  const getLiveSent = useCallback((c) => {
-    if (c.status !== "running") return c.sent;
-    return Math.min(c.total, c.sent + tick * 12);
-  }, [tick]);
+  useEffect(() => {
+    fetchCampaigns();
+    const iv = setInterval(fetchCampaigns, 10000);
+    return () => clearInterval(iv);
+  }, [fetchCampaigns]);
 
-  const counts = {
-    all:       CAMPAIGNS.length,
-    running:   CAMPAIGNS.filter(c => c.status === "running").length,
-    scheduled: CAMPAIGNS.filter(c => c.status === "scheduled").length,
-    paused:    CAMPAIGNS.filter(c => c.status === "paused").length,
-    completed: CAMPAIGNS.filter(c => c.status === "completed").length,
+  // Handle Retry
+  const handleRetryFailed = async (e, id) => {
+    e.stopPropagation();
+    try {
+      await campaignsAPI.launch(id); // assuming launch handles retries or create a new endpoint, for now use launch
+      // Alternatively, we could add campaignsAPI.retry(id) if the backend supports it.
+      fetchCampaigns();
+    } catch (err) {
+      console.error('Retry failed:', err);
+    }
   };
 
-  const filtered = CAMPAIGNS.filter(c => {
+  const counts = {
+    all:       campaigns.length,
+    running:   campaigns.filter(c => c.status === "running").length,
+    scheduled: campaigns.filter(c => c.status === "scheduled").length,
+    paused:    campaigns.filter(c => c.status === "paused").length,
+    completed: campaigns.filter(c => c.status === "completed").length,
+  };
+
+  const filtered = campaigns.filter(c => {
     const ms = !search || c.name.toLowerCase().includes(search.toLowerCase());
     const ss = statusFilter === "all" || c.status === statusFilter;
     return ms && ss;
@@ -353,7 +375,7 @@ function CampaignsList({ onNew, onView }) {
             fontSize:11, color:T.muted }}>
             <span style={{ width:7, height:7, borderRadius:"50%", background:T.green,
               animation:"pulse 1.5s infinite", display:"inline-block" }} />
-            Live · updates every 5s
+            Live · updates every 10s
           </div>
         </div>
 
@@ -391,15 +413,23 @@ function CampaignsList({ onNew, onView }) {
             </thead>
             <tbody>
               {filtered.map((c, i) => {
-                const liveSent = getLiveSent(c);
-                const delivery = pct(c.delivered, liveSent);
-                const openRate = pct(c.read, liveSent);
+                // Real metrics calculation based on database schema stats
+                const s = c.stats || {};
+                const totalTarget = s.totalContacts || 0;
+                const sent = s.sent || 0;
+                const delivered = s.delivered || 0;
+                const read = s.read || 0;
+                const failed = s.failed || 0;
+
+                const deliveryPct = pct(delivered, sent);
+                const readPct = pct(read, sent);
+                
                 return (
-                  <tr key={c.id}
-                    onMouseEnter={() => setHoverRow(c.id)}
+                  <tr key={c._id || c.id}
+                    onMouseEnter={() => setHoverRow(c._id || c.id)}
                     onMouseLeave={() => setHoverRow(null)}
                     onClick={() => onView(c)}
-                    style={{ background: hoverRow===c.id ? T.bg : T.card,
+                    style={{ background: hoverRow===(c._id || c.id) ? T.bg : T.card,
                       borderBottom: i < filtered.length-1 ? `1px solid ${T.border}` : "none",
                       cursor:"pointer", transition:"background .1s" }}>
 
@@ -429,10 +459,17 @@ function CampaignsList({ onNew, onView }) {
                     <td style={{ padding:"13px 14px", minWidth:160 }}>
                       {c.status === "scheduled" || c.status === "draft" ? (
                         <span style={{ fontSize:11, color:T.subtle }}>
-                          {c.total > 0 ? `${c.total.toLocaleString()} contacts` : "—"}
+                          {totalTarget > 0 ? `${totalTarget.toLocaleString()} contacts` : "—"}
                         </span>
                       ) : (
-                        <ProgressBar sent={liveSent} total={c.total} status={c.status} showLabel />
+                        <div>
+                          <ProgressBar sent={sent} total={totalTarget} status={c.status} showLabel />
+                          {failed > 0 && (
+                            <div style={{ marginTop: 4, fontSize: 10, color: T.red, fontWeight: 600 }}>
+                              {failed} failed
+                            </div>
+                          )}
+                        </div>
                       )}
                     </td>
 
@@ -441,25 +478,31 @@ function CampaignsList({ onNew, onView }) {
                       {c.status === "scheduled" || c.status === "draft" ? (
                         <span style={{ color:T.subtle }}>—</span>
                       ) : (
-                        <span style={{ fontFamily:T.mono, fontWeight:700,
-                          color: delivery>95 ? "#16A34A" : delivery>85 ? T.amber : T.red }}>
-                          {delivery}%
-                        </span>
+                        <div style={{ display:"flex", flexDirection:"column" }}>
+                          <span style={{ fontFamily:T.mono, fontWeight:700,
+                            color: deliveryPct>95 ? "#16A34A" : deliveryPct>85 ? T.amber : T.red }}>
+                            {deliveryPct}%
+                          </span>
+                          <span style={{ fontSize:10, color:T.subtle }}>{delivered.toLocaleString()} / {sent.toLocaleString()}</span>
+                        </div>
                       )}
                     </td>
 
-                    {/* Open rate */}
+                    {/* Open rate (actually Read Rate for WhatsApp) */}
                     <td style={{ padding:"13px 14px" }}>
                       {c.status === "scheduled" || c.status === "draft" ? (
                         <span style={{ color:T.subtle }}>—</span>
                       ) : (
                         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                          <span style={{ fontFamily:T.mono, fontWeight:700, color:T.text }}>
-                            {openRate}%
-                          </span>
+                          <div style={{ display:"flex", flexDirection:"column" }}>
+                            <span style={{ fontFamily:T.mono, fontWeight:700, color:T.text }}>
+                              {readPct}%
+                            </span>
+                            <span style={{ fontSize:10, color:T.subtle }}>{read.toLocaleString()} / {sent.toLocaleString()}</span>
+                          </div>
                           <div style={{ width:44, height:4, background:T.border,
                             borderRadius:99, overflow:"hidden" }}>
-                            <div style={{ width:`${openRate}%`, height:"100%",
+                            <div style={{ width:`${readPct}%`, height:"100%",
                               background:T.purple, borderRadius:99 }} />
                           </div>
                         </div>
@@ -477,6 +520,22 @@ function CampaignsList({ onNew, onView }) {
                             fontSize:11, color:T.muted, cursor:"pointer" }}>
                           View
                         </button>
+                        
+                        {/* Retry Failed */}
+                        {failed > 0 && (c.status === "completed" || c.status === "failed" || c.status === "running") && (
+                          <button onClick={(e) => handleRetryFailed(e, c._id || c.id)}
+                            disabled={isViewer}
+                            style={{ padding:"4px 8px", borderRadius:6,
+                              border:`1px solid ${T.amber}`, background:T.amberLight,
+                              color:T.amber, fontSize:11, fontWeight:600, cursor: isViewer ? "not-allowed" : "pointer",
+                              display:"flex", alignItems:"center", gap:4 }}>
+                            <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                              <polyline points="1 4 1 10 7 10"></polyline>
+                              <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+                            </svg>
+                            Retry
+                          </button>
+                        )}
 
                         {/* Pause / Resume */}
                         {c.status === "running" && (
@@ -779,6 +838,7 @@ function CampaignWizard({ onBack, onLaunch }) {
   }, [step]);
 
   const selectedTemplate = templates.find(t => String(t.id || t._id) === String(form.templateId));
+  const normTemplate = normalizeTemplate(selectedTemplate);
 
   const toggleTargetGroup = (id) => {
     setForm(f => ({
@@ -892,21 +952,122 @@ function CampaignWizard({ onBack, onLaunch }) {
     }
   };
 
+  // Unified template normalization layer
+  const normalizeTemplate = (t) => {
+    if (!t) return null;
+    
+    let header = t.header || null;
+    let body = t.body || null;
+    let footer = t.footer || null;
+    let buttons = t.buttons || [];
+    
+    // If template utilizes the raw Meta components list structure
+    if (Array.isArray(t.components)) {
+      const headerComp = t.components.find(c => c.type === 'HEADER');
+      if (headerComp) {
+        header = {
+          type: headerComp.format || 'TEXT',
+          text: headerComp.text || '',
+          mediaUrl: (headerComp.example && headerComp.example.header_url && headerComp.example.header_url[0]) || '',
+          mediaType: headerComp.format === 'IMAGE' ? 'image/jpeg' : headerComp.format === 'VIDEO' ? 'video/mp4' : 'application/pdf'
+        };
+      }
+      
+      const bodyComp = t.components.find(c => c.type === 'BODY');
+      if (bodyComp) {
+        body = {
+          text: bodyComp.text || '',
+          variables: (bodyComp.example && bodyComp.example.body_text && bodyComp.example.body_text[0]) || []
+        };
+      }
+      
+      const footerComp = t.components.find(c => c.type === 'FOOTER');
+      if (footerComp) {
+        footer = {
+          text: footerComp.text || ''
+        };
+      }
+      
+      const buttonsComp = t.components.find(c => c.type === 'BUTTONS');
+      if (buttonsComp && Array.isArray(buttonsComp.buttons)) {
+        buttons = buttonsComp.buttons.map(b => ({
+          type: b.type,
+          text: b.text,
+          url: b.url || '',
+          phoneNumber: b.phone_number || ''
+        }));
+      }
+    }
+    
+    // Normalize properties to prevent null exceptions
+    header = header ? {
+      type: header.type || 'NONE',
+      text: header.text || '',
+      mediaUrl: header.mediaUrl || '',
+      mediaType: header.mediaType || ''
+    } : null;
+    
+    // Handle legacy seeded templates where body is just a string
+    if (typeof body === 'string') {
+      body = {
+        text: body,
+        variables: []
+      };
+    } else {
+      body = body ? {
+        text: body.text || '',
+        variables: Array.isArray(body.variables) ? body.variables : []
+      } : { text: '', variables: [] };
+    }
+
+    
+    footer = footer ? {
+      text: footer.text || ''
+    } : null;
+    
+    buttons = Array.isArray(buttons) ? buttons.map(b => ({
+      type: b.type || 'QUICK_REPLY',
+      text: b.text || '',
+      url: b.url || '',
+      phoneNumber: b.phoneNumber || b.phone_number || ''
+    })) : [];
+    
+    // Parse any curly braces placeholders e.g. {{1}}, {{2}} in body text
+    const bodyText = body.text || '';
+    const detectedVariables = [];
+    const regex = /\{\{(\d+)\}\}/g;
+    let match;
+    while ((match = regex.exec(bodyText)) !== null) {
+      const varNum = match[1];
+      if (!detectedVariables.includes(varNum)) {
+        detectedVariables.push(varNum);
+      }
+    }
+    detectedVariables.sort((a, b) => Number(a) - Number(b));
+    
+    return {
+      ...t,
+      header,
+      body,
+      footer,
+      buttons,
+      variables: detectedVariables.length > 0 ? detectedVariables : body.variables
+    };
+  };
+
   // Helper: Live render WhatsApp message template text
   const renderMessageBody = () => {
     if (!selectedTemplate) return "Select a template in Step 1 to preview your message.";
-    
-    // Find body component
-    const bodyComp = (selectedTemplate.components || []).find(c => c.type === 'BODY');
-    if (!bodyComp || !bodyComp.text) return "No body component in template";
+    const norm = normalizeTemplate(selectedTemplate);
+    if (!norm || !norm.body || !norm.body.text) {
+      return "This template contains no message body.";
+    }
 
-    let text = bodyComp.text;
-    
-    // Replace {{1}}, {{2}}... with mapped variables in real-time
-    const vars = selectedTemplate.variables || [];
+    let text = norm.body.text;
+    const vars = norm.variables || [];
     vars.forEach((v, index) => {
-      const mapping = form.varMap[v] || `{{${index + 1}}}`;
-      text = text.replace(new RegExp(`\\{\\{${index + 1}\\}\\}`, 'g'), `[${mapping}]`);
+      const mapping = form.varMap[v] || `{{${v}}}`;
+      text = text.replace(new RegExp(`\\{\\{${v}\\}\\}`, 'g'), `[${mapping}]`);
     });
 
     return text;
@@ -914,17 +1075,20 @@ function CampaignWizard({ onBack, onLaunch }) {
 
   const getHeaderComponent = () => {
     if (!selectedTemplate) return null;
-    return (selectedTemplate.components || []).find(c => c.type === 'HEADER');
+    const norm = normalizeTemplate(selectedTemplate);
+    return norm ? norm.header : null;
   };
 
   const getFooterComponent = () => {
     if (!selectedTemplate) return null;
-    return (selectedTemplate.components || []).find(c => c.type === 'FOOTER');
+    const norm = normalizeTemplate(selectedTemplate);
+    return norm ? norm.footer : null;
   };
 
   const getButtonsComponent = () => {
-    if (!selectedTemplate) return null;
-    return (selectedTemplate.components || []).find(c => c.type === 'BUTTONS');
+    if (!selectedTemplate) return [];
+    const norm = normalizeTemplate(selectedTemplate);
+    return norm ? norm.buttons : [];
   };
 
   // Success Screen
@@ -1636,13 +1800,13 @@ function CampaignWizard({ onBack, onLaunch }) {
                 Map each placeholder variable in <strong>{selectedTemplate?.name}</strong> to contact fields.
               </div>
 
-              {(!selectedTemplate || (selectedTemplate?.variables || []).length === 0) && (
+              {(!normTemplate || (normTemplate.variables || []).length === 0) && (
                 <div style={{ padding:"24px", textAlign:"center", color:T.subtle, fontSize:13 }}>
                   This template has no variables — no mapping needed ✓
                 </div>
               )}
 
-              {(selectedTemplate?.variables || []).map((v, i) => (
+              {(normTemplate?.variables || []).map((v, i) => (
                 <div key={v} style={{ display:"flex", flexDirection: 'column', gap: 8, padding:"16px", background:T.bg, borderRadius:10, border:`1px solid ${T.border}`, marginBottom:12 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <span style={{ padding:"3px 9px", borderRadius:20, fontSize:11, fontFamily:T.mono, background:T.purpleLight, color:T.purple, border:`1px solid #C4B5FD` }}>
@@ -1698,20 +1862,84 @@ function CampaignWizard({ onBack, onLaunch }) {
                   <div style={{ alignSelf: 'flex-start', background: '#202C33', borderRadius: 8, padding: 8, borderTopLeftRadius: 0, maxWidth: '90%', marginBottom: 10, border: '1px solid #2F3B43' }}>
                     
                     {/* Media Header Preview */}
-                    {getHeaderComponent() && (
-                      <div style={{ background: '#111B21', borderRadius: 6, padding: '16px 8px', marginBottom: 6, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', border: '1px dashed #4F5E68' }}>
-                        <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="#8696A0" strokeWidth="2">
-                          <rect x="3" y="3" width="18" height="18" rx="2"/>
-                          <circle cx="8.5" cy="8.5" r="1.5"/>
-                          <polyline points="21 15 16 10 5 21"/>
-                        </svg>
-                        <span style={{ fontSize: 8, color: '#8696A0', marginTop: 4, fontWeight: 600 }}>Header Image / Video Placeholder</span>
+                    {getHeaderComponent() && getHeaderComponent().type !== 'NONE' && (
+                      <div style={{ marginBottom: 6 }}>
+                        {getHeaderComponent().type === 'IMAGE' && (
+                          <div style={{
+                            width: '100%',
+                            height: 110,
+                            borderRadius: 6,
+                            background: getHeaderComponent().mediaUrl ? `url(${getHeaderComponent().mediaUrl}) center/cover no-repeat` : '#111B21',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            border: '1px dashed #4F5E68',
+                            overflow: 'hidden'
+                          }}>
+                            {!getHeaderComponent().mediaUrl && (
+                              <>
+                                <span style={{ fontSize: 20 }}>🖼️</span>
+                                <span style={{ fontSize: 8, color: '#8696A0', marginTop: 4, fontWeight: 600 }}>Header Image</span>
+                              </>
+                            )}
+                          </div>
+                        )}
+
+                        {getHeaderComponent().type === 'VIDEO' && (
+                          <div style={{
+                            width: '100%',
+                            height: 110,
+                            borderRadius: 6,
+                            background: '#111B21',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            border: '1px dashed #4F5E68',
+                            position: 'relative'
+                          }}>
+                            <div style={{
+                              width: 32,
+                              height: 32,
+                              borderRadius: '50%',
+                              background: 'rgba(255,255,255,0.15)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              border: '1.5px solid #fff'
+                            }}>
+                              <span style={{ color: '#fff', fontSize: 10, marginLeft: 2 }}>▶</span>
+                            </div>
+                            <span style={{ fontSize: 8, color: '#8696A0', marginTop: 6, fontWeight: 600 }}>Header Video Preview</span>
+                          </div>
+                        )}
+
+                        {getHeaderComponent().type === 'DOCUMENT' && (
+                          <div style={{
+                            width: '100%',
+                            borderRadius: 6,
+                            background: '#111B21',
+                            padding: '8px 12px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 10,
+                            border: '1px solid #2F3B43',
+                            boxSizing: 'border-box'
+                          }}>
+                            <span style={{ fontSize: 24 }}>📄</span>
+                            <div style={{ display: 'flex', flexDirection: 'column' }}>
+                              <span style={{ fontSize: 10, fontWeight: 700, color: '#E9EDEF' }}>Attachment.pdf</span>
+                              <span style={{ fontSize: 8, color: '#8696A0' }}>PDF Document · 1.2 MB</span>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
 
                     {/* Header text if any */}
-                    {getHeaderComponent() && getHeaderComponent().text && (
-                      <div style={{ fontSize: 11, fontWeight: 700, color: '#E9EDEF', marginBottom: 4 }}>
+                    {getHeaderComponent() && getHeaderComponent().type === 'TEXT' && getHeaderComponent().text && (
+                      <div style={{ fontSize: 11, fontWeight: 700, color: '#E9EDEF', marginBottom: 6 }}>
                         {getHeaderComponent().text}
                       </div>
                     )}
@@ -1730,13 +1958,32 @@ function CampaignWizard({ onBack, onLaunch }) {
                   </div>
 
                   {/* Buttons Mockup */}
-                  {getButtonsComponent() && (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxWidth: '90%' }}>
-                      {(getButtonsComponent().buttons || []).map((btn, idx) => (
-                        <div key={idx} style={{ background: '#202C33', border: '1px solid #2F3B43', padding: '6px 12px', borderRadius: 6, fontSize: 10.5, color: T.green, textAlign: 'center', fontWeight: 600 }}>
-                          🔗 {btn.text || "Quick Action"}
-                        </div>
-                      ))}
+                  {getButtonsComponent() && getButtonsComponent().length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxWidth: '90%', marginTop: 2 }}>
+                      {getButtonsComponent().map((btn, idx) => {
+                        const icon = btn.type === 'URL' ? '🔗' : btn.type === 'PHONE_NUMBER' ? '📞' : '💬';
+                        return (
+                          <div key={idx} style={{
+                            background: '#202C33',
+                            border: '1px solid #2F3B43',
+                            padding: '8px 12px',
+                            borderRadius: 6,
+                            fontSize: 10.5,
+                            color: '#34D399',
+                            textAlign: 'center',
+                            fontWeight: 600,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: 6,
+                            cursor: 'pointer',
+                            transition: 'all 0.15s'
+                          }}>
+                            <span>{icon}</span>
+                            <span>{btn.text || "Quick Action"}</span>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>

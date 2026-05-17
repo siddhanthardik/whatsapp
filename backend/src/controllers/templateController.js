@@ -6,6 +6,111 @@ function sendResponse(res, success, data = {}, message = '', status = 200) {
 }
 
 /**
+ * STRICT TEMPLATE VALIDATION & SANITIZATION ENGINE
+ */
+function validateAndSanitizeTemplateData(header, body, footer, buttons) {
+  // 1. Body Text Validation
+  if (!body || !body.text || !body.text.trim()) {
+    throw new Error('Message body text is required');
+  }
+  
+  const text = body.text;
+  
+  // Detect unclosed variables or invalid formatting
+  const openBraces = (text.match(/\{/g) || []).length;
+  const closeBraces = (text.match(/\}/g) || []).length;
+  if (openBraces !== closeBraces) {
+    throw new Error('Malformed variable placeholder syntax: mismatched curly braces count');
+  }
+  
+  // Find all matches of {{...}}
+  const regex = /\{\{(.*?)\}\}/g;
+  let match;
+  const vars = [];
+  while ((match = regex.exec(text)) !== null) {
+    const varContent = match[1].trim();
+    if (!/^\d+$/.test(varContent)) {
+      throw new Error(`Invalid variable placeholder format "{{${varContent}}}": only positive integers are allowed`);
+    }
+    const num = parseInt(varContent, 10);
+    if (num <= 0) {
+      throw new Error(`Invalid variable index "{{${varContent}}}": variable indexes must be positive integers starting at 1`);
+    }
+    if (!vars.includes(varContent)) {
+      vars.push(varContent);
+    }
+  }
+  
+  // Variables must be sequential starting from 1 (e.g. {{1}}, {{2}}...)
+  if (vars.length > 0) {
+    const sorted = vars.map(v => parseInt(v, 10)).sort((a, b) => a - b);
+    for (let i = 0; i < sorted.length; i++) {
+      if (sorted[i] !== i + 1) {
+        throw new Error(`Variable placeholders must be sequential and start at 1. Expected "{{${i + 1}}}", found "{{${sorted[i]}}}"`);
+      }
+    }
+  }
+
+  // 2. Header Validation
+  if (header && header.type && header.type !== 'NONE') {
+    if (header.type === 'TEXT') {
+      if (!header.text || !header.text.trim()) {
+        throw new Error('Header text content is required for TEXT type headers');
+      }
+      if (header.text.trim().length > 60) {
+        throw new Error('TEXT type headers cannot exceed 60 characters');
+      }
+    } else if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(header.type)) {
+      if (!header.mediaUrl || !header.mediaUrl.trim()) {
+        throw new Error(`mediaUrl is required for ${header.type} type headers`);
+      }
+      if (!/^https?:\/\//i.test(header.mediaUrl) && !/^data:image\//i.test(header.mediaUrl)) {
+        throw new Error(`Invalid mediaUrl format for ${header.type} type headers: must be a valid URL`);
+      }
+    }
+  }
+
+  // 3. Buttons Validation
+  if (buttons && Array.isArray(buttons)) {
+    if (buttons.length > 10) {
+      throw new Error('A template cannot contain more than 10 buttons');
+    }
+    for (const btn of buttons) {
+      if (!btn.type) throw new Error('Button type is required');
+      if (!btn.text || !btn.text.trim()) throw new Error('Button display text is required');
+      if (btn.text.trim().length > 25) throw new Error('Button text cannot exceed 25 characters');
+
+      if (btn.type === 'URL') {
+        if (!btn.url || !btn.url.trim()) throw new Error('url is required for URL type buttons');
+        if (!/^https?:\/\//i.test(btn.url.trim())) {
+          throw new Error('Invalid URL format for button: must be a valid web link starting with http/https');
+        }
+      } else if (btn.type === 'PHONE_NUMBER') {
+        const phone = btn.phoneNumber || btn.phone_number;
+        if (!phone || !phone.trim()) throw new Error('phoneNumber is required for PHONE_NUMBER type buttons');
+        if (!/^\+?[1-9]\d{1,14}$/.test(phone.trim().replace(/\s+/g, ''))) {
+          throw new Error('Invalid phone number format for button: must be in international format (e.g. +1234567890)');
+        }
+      }
+    }
+  }
+
+  // Auto-detect dynamic variables list
+  const detectedVars = [];
+  const regexDetect = /\{\{(\d+)\}\}/g;
+  let detectMatch;
+  while ((detectMatch = regexDetect.exec(text)) !== null) {
+    const varNum = detectMatch[1];
+    if (!detectedVars.includes(varNum)) {
+      detectedVars.push(varNum);
+    }
+  }
+  detectedVars.sort((a, b) => Number(a) - Number(b));
+  
+  return detectedVars;
+}
+
+/**
  * CREATE TEMPLATE
  * Accepts new structure with body: { text, variables }
  */
@@ -54,6 +159,10 @@ exports.createTemplate = async (req, res) => {
       createdBy: user.id,
       approvalStatus: 'DRAFT', // Always start as DRAFT
     });
+
+    // Run strict sanitization
+    validateAndSanitizeTemplateData(template.header, template.body, template.footer, template.buttons);
+
 
     await template.save();
     await template.populate('createdBy', 'name email');
@@ -110,7 +219,7 @@ exports.getTemplates = async (req, res) => {
       body: t.body,
       footer: t.footer,
       buttons: t.buttons || [],
-      preview: t.body?.text ? t.body.text.substring(0, 100) : '',
+      preview: typeof t.body === 'string' ? t.body.substring(0, 100) : (t.body?.text ? t.body.text.substring(0, 100) : ''),
       createdAt: t.createdAt,
       updatedAt: t.updatedAt,
     }));
@@ -220,9 +329,12 @@ exports.updateTemplate = async (req, res) => {
     if (!template.name || !template.name.trim()) {
       return sendResponse(res, false, {}, 'Display name is required', 400);
     }
-    if (!template.body || !template.body.text || !template.body.text.trim()) {
+    if (!template.body || (!template.body.text && typeof template.body !== 'string')) {
       return sendResponse(res, false, {}, 'Message body text is required', 400);
     }
+
+    // Run strict sanitization
+    validateAndSanitizeTemplateData(template.header, template.body, template.footer, template.buttons);
 
     await template.save();
     return sendResponse(res, true, { template }, 'Template updated');
@@ -445,5 +557,111 @@ exports.submitToWhatsApp = async (req, res) => {
       `Failed to submit template: ${metaErrorMsg}`,
       err.response?.status || 500
     );
+  }
+};
+
+/**
+ * SYNC TEMPLATES FROM WHATSAPP
+ */
+exports.syncFromWhatsApp = async (req, res) => {
+  try {
+    const user = req.user;
+    if (!user) return sendResponse(res, false, {}, 'Authentication required', 401);
+
+    const wabaId = process.env.WABA_BUSINESS_ACCOUNT_ID;
+    const token = process.env.WHATSAPP_API_TOKEN;
+    if (!wabaId || !token) {
+      return sendResponse(res, false, {}, 'WhatsApp configuration incomplete', 500);
+    }
+
+    // Fetch from Meta Cloud API
+    const response = await axios.get(
+      `https://graph.facebook.com/v19.0/${wabaId}/message_templates`,
+      {
+        headers: { Authorization: `Bearer ${token}` }
+      }
+    );
+
+    const templates = response.data?.data || [];
+    let syncedCount = 0;
+    const errors = [];
+
+    for (const t of templates) {
+      try {
+        let header = null;
+        let body = { text: '', variables: [] };
+        let footer = null;
+        let buttons = [];
+
+        // Parse components
+        if (Array.isArray(t.components)) {
+          const headerComp = t.components.find(c => c.type === 'HEADER');
+          if (headerComp) {
+            header = {
+              type: headerComp.format || 'TEXT',
+              text: headerComp.text || '',
+              mediaUrl: (headerComp.example && headerComp.example.header_url && headerComp.example.header_url[0]) || '',
+              mediaType: headerComp.format === 'IMAGE' ? 'image/jpeg' : headerComp.format === 'VIDEO' ? 'video/mp4' : 'application/pdf'
+            };
+            if (header.type === 'NONE') header = null;
+          }
+
+          const bodyComp = t.components.find(c => c.type === 'BODY');
+          if (bodyComp) {
+            body.text = bodyComp.text || '';
+            body.variables = (bodyComp.example && bodyComp.example.body_text && bodyComp.example.body_text[0]) || [];
+          }
+
+          const footerComp = t.components.find(c => c.type === 'FOOTER');
+          if (footerComp) {
+            footer = { text: footerComp.text || '' };
+          }
+
+          const buttonsComp = t.components.find(c => c.type === 'BUTTONS');
+          if (buttonsComp && Array.isArray(buttonsComp.buttons)) {
+            buttons = buttonsComp.buttons.map(b => ({
+              type: b.type,
+              text: b.text,
+              url: b.url || '',
+              phoneNumber: b.phone_number || ''
+            }));
+          }
+        }
+
+        // Sanitize parsed structure
+        validateAndSanitizeTemplateData(header, body, footer, buttons);
+
+        // Map status
+        let approvalStatus = 'PENDING';
+        if (t.status === 'APPROVED') approvalStatus = 'APPROVED';
+        if (t.status === 'REJECTED') approvalStatus = 'REJECTED';
+
+        await Template.findOneAndUpdate(
+          { templateId: t.name, language: t.language, organizationId: user.organizationId },
+          {
+            $set: {
+              name: t.name,
+              category: t.category || 'UTILITY',
+              whatsappTemplateId: t.id,
+              approvalStatus,
+              header,
+              body,
+              footer,
+              buttons,
+              createdBy: user.id
+            }
+          },
+          { upsert: true, new: true, setDefaultsOnInsert: true }
+        );
+        syncedCount++;
+      } catch (err) {
+        errors.push({ template: t.name, error: err.message });
+      }
+    }
+
+    return sendResponse(res, true, { syncedCount, errors }, 'Templates synchronized with WhatsApp');
+  } catch (err) {
+    console.error('syncFromWhatsApp error:', err);
+    return sendResponse(res, false, {}, 'Failed to sync templates', 500);
   }
 };

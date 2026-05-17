@@ -33,27 +33,65 @@ queue.process(async (job, done) => {
     let template = null;
     if (templateId) template = await Template.findById(templateId);
 
-    // Build message payload (simple text replacement for variables)
-    let messageText = campaign.description || '';
-    if (template && template.body) {
-      messageText = template.body;
-      // replace variables like {{name}}
+    // Build message payload
+    let payload;
+    
+    if (template && template.name) {
+      // Build Meta Cloud API template payload
+      const components = [];
+      
+      // We only support simple text variables in the BODY for now, but this can be extended
+      if (template.body && template.body.variables && template.body.variables.length > 0) {
+        const parameters = [];
+        // The variables array contains standard placeholders like "1", "2"
+        const vars = Object.assign({}, personalizeVariables || {}, { name: contact.name || '' });
+        
+        template.body.variables.forEach((v) => {
+          // If the user provided a mapping for this variable, use it, else use fallback
+          const val = vars[v] || `value_${v}`;
+          parameters.push({ type: 'text', text: String(val) });
+        });
+        
+        if (parameters.length > 0) {
+          components.push({
+            type: 'body',
+            parameters
+          });
+        }
+      }
+
+      payload = {
+        messaging_product: 'whatsapp',
+        to: phoneNumber,
+        type: 'template',
+        template: {
+          name: template.name,
+          language: {
+            code: template.language || 'en_US'
+          },
+          components
+        }
+      };
+    } else {
+      // Fallback for non-template messages (e.g. standard session messages)
+      let messageText = campaign.description || '';
       const vars = Object.assign({}, personalizeVariables || {}, { name: contact.name || '' });
       Object.keys(vars).forEach((k) => {
         const re = new RegExp(`{{\\s*${k}\\s*}}`, 'g');
         messageText = messageText.replace(re, vars[k]);
       });
-    }
-
-    // Send via Meta WhatsApp API if configured
-    if (WABA_TOKEN && WABA_PHONE_NUMBER_ID) {
-      const url = `https://graph.facebook.com/v16.0/${WABA_PHONE_NUMBER_ID}/messages`;
-      const payload = {
+      
+      payload = {
         messaging_product: 'whatsapp',
         to: phoneNumber,
         type: 'text',
         text: { body: messageText },
       };
+    }
+
+    // Send via Meta WhatsApp API if configured
+    if (WABA_TOKEN && WABA_PHONE_NUMBER_ID) {
+      const url = `https://graph.facebook.com/v19.0/${WABA_PHONE_NUMBER_ID}/messages`;
       const headers = { Authorization: `Bearer ${WABA_TOKEN}` };
 
       try {
@@ -62,16 +100,19 @@ queue.process(async (job, done) => {
         
         await Message.create({
           organizationId: campaign.organizationId,
+          campaignId,
+          contactId,
           sentBy: campaign.createdBy,
           to: phoneNumber,
-          type: 'template',
+          type: template ? 'template' : 'text',
           template: {
             name: template?.name || 'campaign_template',
-            language: template?.language || 'en',
-            components: []
+            language: template?.language || 'en_US',
+            components: payload.template?.components || []
           },
           status: 'sent',
-          wamid
+          wamid,
+          metaResponse: resp.data
         });
 
         // update campaign stats
@@ -89,16 +130,19 @@ queue.process(async (job, done) => {
         
         await Message.create({
           organizationId: campaign.organizationId,
+          campaignId,
+          contactId,
           sentBy: campaign.createdBy,
           to: phoneNumber,
-          type: 'template',
+          type: template ? 'template' : 'text',
           template: {
             name: template?.name || 'campaign_template',
-            language: template?.language || 'en',
-            components: []
+            language: template?.language || 'en_US',
+            components: payload.template?.components || []
           },
           status: 'failed',
-          errorDetails: err.response?.data?.error?.message || err.message
+          errorDetails: err.response?.data?.error?.message || err.message,
+          metaResponse: err.response ? err.response.data : null
         });
 
         await Campaign.findByIdAndUpdate(campaignId, { $inc: { 'stats.failed': 1 } }, { new: true, upsert: true });
@@ -110,16 +154,19 @@ queue.process(async (job, done) => {
     const wamid = `sim_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
     await Message.create({
       organizationId: campaign.organizationId,
+      campaignId,
+      contactId,
       sentBy: campaign.createdBy,
       to: phoneNumber,
-      type: 'template',
+      type: template ? 'template' : 'text',
       template: {
         name: template?.name || 'campaign_template',
-        language: template?.language || 'en',
-        components: []
+        language: template?.language || 'en_US',
+        components: payload.template?.components || []
       },
       status: 'sent',
-      wamid
+      wamid,
+      metaResponse: { simulated: true, payload }
     });
 
     await Campaign.findByIdAndUpdate(campaignId, { $inc: { 'stats.sent': 1 } }, { new: true, upsert: true });
@@ -136,11 +183,13 @@ queue.process(async (job, done) => {
       try {
         await Message.create({
           organizationId: job.data.organizationId || null,
+          campaignId: job.data.campaignId,
+          contactId: job.data.contactId,
           to: phoneNumber,
           type: 'template',
           template: {
             name: 'campaign_template',
-            language: 'en',
+            language: 'en_US',
             components: []
           },
           status: 'failed',
