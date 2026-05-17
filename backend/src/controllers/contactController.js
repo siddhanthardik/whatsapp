@@ -311,12 +311,12 @@ exports.deleteContact = async (req, res) => {
   }
 };
 
-// getContacts - pagination, search, filter by tag/list/optInStatus
+// getContacts — full-featured: search, tag, groupId, status filters + pagination + populate groups
 exports.getContacts = async (req, res) => {
   try {
     const user = req.user;
     if (!user) return sendResponse(res, false, {}, 'Authentication required', 401);
-    // simple org resolution: prefer req.user.organizationId, otherwise read from DB
+
     let orgId = user.organizationId || null;
     if (!orgId) {
       try {
@@ -327,12 +327,61 @@ exports.getContacts = async (req, res) => {
       }
     }
 
-    const query = orgId ? { organizationId: orgId } : {};
+    const { search, tag, groupId, optInStatus, page = 1, limit = 50 } = req.query;
+    const pageNum  = Math.max(1, parseInt(page, 10)  || 1);
+    const limitNum = Math.min(200, parseInt(limit, 10) || 50);
+    const skip = (pageNum - 1) * limitNum;
 
-    // limit results to 200; always return 200 and an array
-    const contacts = await Contact.find(query).limit(200).lean();
-    return res.status(200).json(contacts || []);
+    // Base filter — always scoped to organization
+    const filter = orgId ? { organizationId: orgId } : {};
+
+    // Search across name, email, phoneNumber
+    if (search && search.trim()) {
+      const re = new RegExp(search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      filter.$or = [{ name: re }, { email: re }, { phoneNumber: re }];
+    }
+
+    // Filter by a single tag
+    if (tag && tag !== 'all') {
+      filter.tags = tag;
+    }
+
+    // Filter by group — org-scoped; validate groupId belongs to this org via Contact index
+    if (groupId && groupId !== 'all' && mongoose.Types.ObjectId.isValid(groupId)) {
+      filter.groupIds = new mongoose.Types.ObjectId(groupId);
+    }
+
+    // Filter by opt-in status
+    if (optInStatus && optInStatus !== 'all') {
+      filter.optInStatus = optInStatus;
+    }
+
+    const [total, rawContacts] = await Promise.all([
+      Contact.countDocuments(filter),
+      Contact.find(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limitNum)
+        .populate('groupIds', 'name color')  // populate group name + color for badges
+        .lean(),
+    ]);
+
+    // Normalize fields for frontend compatibility
+    const contacts = rawContacts.map(c => ({
+      ...c,
+      id:     c._id,
+      phone:  c.phoneNumber,
+      status: c.optInStatus || 'pending',
+      // groupIds is now populated: [{ _id, name, color }]
+      groups: Array.isArray(c.groupIds) ? c.groupIds : [],
+    }));
+
+    return sendResponse(res, true, {
+      contacts,
+      meta: { total, page: pageNum, limit: limitNum, pages: Math.ceil(total / limitNum) },
+    }, 'Contacts retrieved');
   } catch (err) {
+    console.error('getContacts error:', err);
     return sendResponse(res, false, {}, 'Failed to retrieve contacts', 500);
   }
 };

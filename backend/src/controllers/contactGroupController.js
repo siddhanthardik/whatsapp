@@ -1,4 +1,5 @@
 const ContactGroup = require('../models/ContactGroup');
+const Contact = require('../models/Contact');
 const User = require('../models/User');
 
 function sendResponse(res, success, data = {}, message = '', status = 200) {
@@ -11,13 +12,13 @@ function sendResponse(res, success, data = {}, message = '', status = 200) {
  */
 async function resolveOrgId(user) {
   if (user.organizationId) return String(user.organizationId);
-  // Fallback: load from DB if token did not include it
   const userDoc = await User.findById(user.id).select('organizationId');
   return (userDoc && userDoc.organizationId) ? String(userDoc.organizationId) : null;
 }
 
 // ─── GET /api/contact-groups ─────────────────────────────────────────────────
-// Returns all groups for the authenticated user's organization.
+// Returns all groups for the authenticated user's organization, including
+// contactCount for each group via a single aggregation (no N+1 queries).
 exports.getContactGroups = async (req, res) => {
   try {
     const user = req.user;
@@ -26,7 +27,23 @@ exports.getContactGroups = async (req, res) => {
     const orgId = await resolveOrgId(user);
     if (!orgId) return sendResponse(res, false, {}, 'Organization not found for user', 400);
 
-    const groups = await ContactGroup.find({ organizationId: orgId }).sort({ name: 1 });
+    const mongoose = require('mongoose');
+
+    // Aggregate contact counts per group in one query
+    const countAgg = await Contact.aggregate([
+      { $match: { organizationId: new mongoose.Types.ObjectId(orgId) } },
+      { $unwind: '$groupIds' },
+      { $group: { _id: '$groupIds', count: { $sum: 1 } } },
+    ]);
+    const countMap = {};
+    for (const row of countAgg) countMap[String(row._id)] = row.count;
+
+    const rawGroups = await ContactGroup.find({ organizationId: orgId }).sort({ name: 1 }).lean();
+    const groups = rawGroups.map(g => ({
+      ...g,
+      contactCount: countMap[String(g._id)] || 0,
+    }));
+
     return sendResponse(res, true, { groups }, 'Contact groups retrieved');
   } catch (err) {
     console.error('getContactGroups error:', err);

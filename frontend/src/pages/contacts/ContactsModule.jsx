@@ -106,6 +106,18 @@ function Tag({ label }) {
   );
 }
 
+function GroupBadge({ group }) {
+  if (!group || !group.name) return null;
+  const color = group.color || T.border;
+  return (
+    <span style={{ padding:"2px 8px", borderRadius:6, fontSize:10, fontWeight:600,
+      border: `1px solid ${color}40`, color: color, whiteSpace:"nowrap", display: "inline-flex", alignItems: "center", gap: 4 }}>
+      <span style={{ width:4, height:4, borderRadius:"50%", background:color }}/>
+      {group.name}
+    </span>
+  );
+}
+
 const STATUS_CFG = {
   opted_in:  { label:"Opted in",  bg:"#DCFCE7", color:"#166534", dot:"#22C55E" },
   opted_out: { label:"Opted out", bg:"#FEE2E2", color:"#7F1D1D", dot:"#EF4444" },
@@ -413,19 +425,31 @@ function ContactsListScreen({ onViewContact, onImport }) {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showOptOutConfirm, setShowOptOutConfirm] = useState(null);
   const [hoverRow, setHoverRow] = useState(null);
+  const [groupFilter, setGroupFilter] = useState("all");
+  const [availableGroups, setAvailableGroups] = useState([]);
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [groupDropdownOpen, setGroupDropdownOpen] = useState(false);
   const [contacts, setContacts] = useState([]);
   const [meta, setMeta] = useState({ total: CONTACTS.length, page: 1, limit: 8 });
   const [loading, setLoading] = useState(false);
   const PER_PAGE = 8;
 
+  const fetchGroups = async () => {
+    try {
+      const res = await contactGroupsAPI.list();
+      if (res?.data?.success) setAvailableGroups(res.data.data.groups || []);
+    } catch(err) { console.error('Failed to fetch groups', err); }
+  };
+
   const sourceContacts = contacts.length ? contacts : CONTACTS;
   const filtered = sourceContacts.filter(c => {
     const q = search.toLowerCase();
-    const matchSearch = !search || c.name.toLowerCase().includes(q) || c.phone.includes(q) || c.email.toLowerCase().includes(q);
+    const matchSearch = !search || c.name.toLowerCase().includes(q) || c.phone.includes(q) || c.email?.toLowerCase().includes(q);
     const matchStatus = statusFilter === "all" || c.status === statusFilter;
-    const matchTag    = tagFilter === "all" || c.tags.includes(tagFilter);
-    return matchSearch && matchStatus && matchTag;
+    const matchTag    = tagFilter === "all" || (c.tags && c.tags.includes(tagFilter));
+    // Client-side filtering fallback for mock data
+    const matchGroup  = groupFilter === "all" || (c.groups && c.groups.some(g => String(g._id) === groupFilter || String(g.id) === groupFilter));
+    return matchSearch && matchStatus && matchTag && matchGroup;
   });
 
   const paginated = filtered.slice((page-1)*PER_PAGE, page*PER_PAGE);
@@ -449,6 +473,7 @@ function ContactsListScreen({ onViewContact, onImport }) {
       if (opts.search !== undefined ? opts.search : search) params.search = opts.search !== undefined ? opts.search : search;
       if (opts.tag !== undefined ? opts.tag : (tagFilter !== 'all')) params.tag = opts.tag !== undefined ? opts.tag : (tagFilter !== 'all' ? tagFilter : undefined);
       if (opts.status !== undefined ? opts.status : (statusFilter !== 'all')) params.optInStatus = opts.status !== undefined ? opts.status : (statusFilter !== 'all' ? statusFilter : undefined);
+      if (opts.group !== undefined ? opts.group : (groupFilter !== 'all')) params.groupId = opts.group !== undefined ? opts.group : (groupFilter !== 'all' ? groupFilter : undefined);
       const res = await contactsAPI.list(params);
       if (res?.data?.success) {
         setContacts(res.data.data.contacts);
@@ -463,13 +488,12 @@ function ContactsListScreen({ onViewContact, onImport }) {
   };
 
   useEffect(() => {
-    // initial load
     fetchContacts();
-  }, [page, search, tagFilter, statusFilter]);
+  }, [page, search, tagFilter, statusFilter, groupFilter]);
 
   useEffect(() => {
-    // listen for external refresh requests
-    const handler = () => fetchContacts({ page: 1 });
+    fetchGroups();
+    const handler = () => { fetchContacts({ page: 1 }); fetchGroups(); };
     window.addEventListener('contacts:refresh', handler);
     return () => window.removeEventListener('contacts:refresh', handler);
   }, []);
@@ -553,6 +577,41 @@ function ContactsListScreen({ onViewContact, onImport }) {
               </div>
             )}
           </div>
+
+          <div style={{ position:"relative" }}>
+            <button onClick={()=>setGroupDropdownOpen(o=>!o)} style={{
+              display:"flex", alignItems:"center", gap:6, padding:"8px 12px",
+              borderRadius:8, border:`1px solid ${T.border}`, background:T.card,
+              fontSize:13, color: groupFilter!=="all" ? T.blue : T.muted, cursor:"pointer", fontWeight: groupFilter!=="all"?600:400 }}>
+              {I.org} {groupFilter==="all" ? "Filter by group" : availableGroups.find(g=>g._id===groupFilter)?.name || "Group"} {I.chevD}
+            </button>
+            {groupDropdownOpen && (
+              <div style={{ position:"absolute", top:"calc(100% + 4px)", left:0, zIndex:50,
+                background:T.card, border:`1px solid ${T.border}`, borderRadius:10,
+                boxShadow:"0 8px 24px rgba(0,0,0,.1)", minWidth:200, maxHeight:300, overflowY:"auto" }}>
+                <button onClick={()=>{ setGroupFilter("all"); setGroupDropdownOpen(false); setPage(1); }}
+                  style={{ display:"block", width:"100%", padding:"9px 14px", textAlign:"left",
+                    border:"none", background: groupFilter==="all" ? T.blueLight : "transparent",
+                    color: groupFilter==="all" ? T.blue : T.text, fontSize:13, cursor:"pointer",
+                    fontWeight: groupFilter==="all" ? 600 : 400 }}>
+                  All Groups
+                </button>
+                {availableGroups.map(g => (
+                  <button key={g._id} onClick={()=>{ setGroupFilter(g._id); setGroupDropdownOpen(false); setPage(1); }}
+                    style={{ display:"flex", alignItems:"center", justifyContent:"space-between", width:"100%", padding:"9px 14px", textAlign:"left",
+                      border:"none", background: groupFilter===g._id ? T.blueLight : "transparent",
+                      color: groupFilter===g._id ? T.blue : T.text, fontSize:13, cursor:"pointer",
+                      fontWeight: groupFilter===g._id ? 600 : 400 }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                      <span style={{ width:8, height:8, borderRadius:"50%", background:g.color||T.border }}/>
+                      {g.name}
+                    </div>
+                    <span style={{ fontSize:11, color:T.muted }}>{g.contactCount}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* BULK ACTIONS */}
@@ -622,10 +681,16 @@ function ContactsListScreen({ onViewContact, onImport }) {
                   </td>
                   <td style={{ padding:"12px 14px" }} onClick={()=>onViewContact(c)}>
                     <div style={{ display:"flex", gap:4, flexWrap:"wrap" }}>
-                      {[...new Set(c.tags)].slice(0,2).map(t => <Tag key={t} label={t}/>)}
-                      {[...new Set(c.tags)].length > 2 &&
+                      {[...new Set(c.tags||[])].slice(0,2).map(t => <Tag key={t} label={t}/>)}
+                      {[...new Set(c.tags||[])].length > 2 &&
                         <span style={{ fontSize:10, color:T.subtle }}>+{[...new Set(c.tags)].length-2}</span>}
                     </div>
+                    {c.groups && c.groups.length > 0 && (
+                      <div style={{ display:"flex", gap:4, flexWrap:"wrap", marginTop:4 }}>
+                        {c.groups.slice(0,2).map(g => <GroupBadge key={g._id||g.id} group={g} />)}
+                        {c.groups.length > 2 && <span style={{ fontSize:10, color:T.subtle }}>+{c.groups.length-2}</span>}
+                      </div>
+                    )}
                   </td>
                   <td style={{ padding:"12px 14px", fontSize:11, color:T.muted }}
                     onClick={()=>onViewContact(c)}>
@@ -1437,35 +1502,27 @@ function ContactDetailScreen({ contact, onBack }) {
                   </div>
                   <div style={{ padding:"16px 18px" }}>
                     <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:12 }}>
-                      {[...new Set(contact.tags)].map(t=>(
+                      {[...new Set(contact.tags || [])].map(t=>(
                         <div key={t} style={{ display:"flex", alignItems:"center", gap:5 }}>
                           <Tag label={t}/>
-                          <button style={{ width:16, height:16, borderRadius:"50%", border:"none",
-                            background:T.border, cursor:"pointer", fontSize:10, color:T.muted, lineHeight:1 }}>×</button>
                         </div>
-                      ))}
-                    </div>
-                    <div style={{ fontSize:12, color:T.subtle }}>Add tags:</div>
-                    <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginTop:8 }}>
-                      {TAGS.filter(t=>![...new Set(contact.tags)].includes(t)).map(t=>(
-                        <button key={t} style={{ padding:"3px 10px", borderRadius:20, fontSize:11,
-                          border:`1px dashed ${T.borderMid}`, background:"transparent",
-                          color:T.muted, cursor:"pointer" }}>
-                          + {t}
-                        </button>
                       ))}
                     </div>
                   </div>
                 </div>
                 <div style={{ background:T.card, borderRadius:12, border:`1px solid ${T.border}`, padding:"16px 18px" }}>
                   <div style={{ fontSize:12, fontWeight:700, color:T.muted, letterSpacing:"0.05em",
-                    textTransform:"uppercase", marginBottom:12 }}>Contact lists</div>
-                  {["Premium Customers", "Festival Campaign 2025", "Delhi Region"].map((list,i)=>(
-                    <div key={list} style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
-                      padding:"9px 0", borderBottom: i<2?`1px solid ${T.border}`:"none" }}>
-                      <span style={{ fontSize:13, color:T.text }}>{list}</span>
-                      <button style={{ fontSize:11, color:T.red, border:"none", background:"transparent",
-                        cursor:"pointer", padding:"3px 8px" }}>Remove</button>
+                    textTransform:"uppercase", marginBottom:12 }}>Contact Groups</div>
+                  {(!contact.groups || contact.groups.length === 0) && (
+                    <div style={{ fontSize:13, color:T.subtle }}>Not in any groups</div>
+                  )}
+                  {contact.groups && contact.groups.map((group,i)=>(
+                    <div key={group._id||group.id} style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
+                      padding:"9px 0", borderBottom: i<contact.groups.length-1 ? `1px solid ${T.border}`:"none" }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                         <span style={{ width:6, height:6, borderRadius:"50%", background:group.color||T.border }}/>
+                         <span style={{ fontSize:13, color:T.text }}>{group.name}</span>
+                      </div>
                     </div>
                   ))}
                 </div>
