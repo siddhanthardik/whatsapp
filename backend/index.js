@@ -27,11 +27,13 @@ const organizationsRoutes = require('./src/routes/organizations');
 const subscriptionRoutes = require('./src/routes/subscription');
 const superAdminRoutes = require('./src/routes/superAdmin');
 const startMonthlyResetJob = require('./src/jobs/monthlyReset');
+const startCampaignScheduler = require('./src/jobs/campaignScheduler');
 
 const app = express();
 
 // Start cron jobs
 startMonthlyResetJob();
+startCampaignScheduler();
 
 
 // ---------------- SECURITY ----------------

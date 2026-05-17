@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import api, { templatesAPI, campaignsAPI } from "../../services/api";
+import useAuthStore from "../../store/authStore";
 
 /* ─────────────────────────────────────────────
    DESIGN TOKENS
@@ -159,6 +160,11 @@ function MetricPill({ label, value, color, sub }) {
 const NAV = ["Dashboard","Contacts","Templates","Campaigns","Analytics","Reports","Opt-In / Out"];
 
 function Sidebar() {
+  const { user } = useAuthStore();
+  const name = user?.name || "Piyush Admin";
+  const role = user?.role ? user.role.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase()) : "Super Admin";
+  const initials = name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || "PA";
+
   return (
     <div style={{ width:200, flexShrink:0, background:T.sidebar, display:"flex",
       flexDirection:"column", height:"100vh", position:"sticky", top:0,
@@ -198,10 +204,10 @@ function Sidebar() {
         display:"flex", alignItems:"center", gap:8 }}>
         <div style={{ width:28, height:28, borderRadius:"50%", background:T.green,
           display:"flex", alignItems:"center", justifyContent:"center",
-          fontSize:10, fontWeight:700, color:"#fff" }}>PA</div>
+          fontSize:10, fontWeight:700, color:"#fff" }}>{initials}</div>
         <div>
-          <div style={{ fontSize:11, fontWeight:600, color:"#E2E8F0" }}>Piyush Admin</div>
-          <div style={{ fontSize:9, color:"#475569" }}>Super Admin</div>
+          <div style={{ fontSize:11, fontWeight:600, color:"#E2E8F0" }}>{name}</div>
+          <div style={{ fontSize:9, color:"#475569" }}>{role}</div>
         </div>
       </div>
     </div>
@@ -259,6 +265,9 @@ function ConfirmModal({ open, onClose, onConfirm, title, msg, label="Confirm", d
    SCREEN 1 — CAMPAIGNS LIST
 ───────────────────────────────────────────── */
 function CampaignsList({ onNew, onView }) {
+  const { user } = useAuthStore();
+  const isViewer = user?.role === 'viewer';
+
   const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch]             = useState("");
   const [hoverRow, setHoverRow]         = useState(null);
@@ -298,15 +307,19 @@ function CampaignsList({ onNew, onView }) {
         subtitle={`${counts.all} campaigns · ${counts.running} running · ${counts.scheduled} scheduled`}
         actions={
           <div style={{ display:"flex", gap:8 }}>
-            <button onClick={onNew}
+            <button onClick={isViewer ? undefined : onNew}
+              disabled={isViewer}
               style={{ display:"flex", alignItems:"center", gap:6,
                 padding:"8px 14px", borderRadius:8, border:"none",
-                background:T.green, color:"#fff", fontSize:13, fontWeight:600, cursor:"pointer" }}>
+                background: isViewer ? T.border : T.green,
+                color: isViewer ? T.muted : "#fff",
+                fontSize:13, fontWeight:600,
+                cursor: isViewer ? "not-allowed" : "pointer" }}>
               <svg width="13" height="13" fill="none" viewBox="0 0 24 24"
                 stroke="currentColor" strokeWidth="2.5">
                 <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
               </svg>
-              New Campaign
+              {isViewer ? "New Campaign (Read-only)" : "New Campaign"}
             </button>
           </div>
         }
@@ -468,17 +481,23 @@ function CampaignsList({ onNew, onView }) {
                         {/* Pause / Resume */}
                         {c.status === "running" && (
                           <button onClick={() => {}}
+                            disabled={isViewer}
                             style={{ padding:"4px 10px", borderRadius:6,
-                              border:`1px solid ${T.amber}30`, background:T.amberLight,
-                              fontSize:11, color:T.amber, fontWeight:600, cursor:"pointer" }}>
+                              border:`1px solid ${isViewer ? T.border : `${T.amber}30`}`,
+                              background: isViewer ? T.border : T.amberLight,
+                              fontSize:11, color: isViewer ? T.muted : T.amber,
+                              fontWeight:600, cursor: isViewer ? "not-allowed" : "pointer" }}>
                             ⏸ Pause
                           </button>
                         )}
                         {c.status === "paused" && (
                           <button onClick={() => {}}
+                            disabled={isViewer}
                             style={{ padding:"4px 10px", borderRadius:6,
-                              border:`1px solid ${T.green}30`, background:T.greenLight,
-                              fontSize:11, color:T.greenDark, fontWeight:600, cursor:"pointer" }}>
+                              border:`1px solid ${isViewer ? T.border : `${T.green}30`}`,
+                              background: isViewer ? T.border : T.greenLight,
+                              fontSize:11, color: isViewer ? T.muted : T.greenDark,
+                              fontWeight:600, cursor: isViewer ? "not-allowed" : "pointer" }}>
                             ▶ Resume
                           </button>
                         )}
@@ -486,10 +505,11 @@ function CampaignsList({ onNew, onView }) {
                         {/* Cancel */}
                         {(c.status === "running" || c.status === "paused" || c.status === "scheduled") && (
                           <button onClick={() => setConfirmCancel(c)}
+                            disabled={isViewer}
                             style={{ width:28, height:28, borderRadius:6,
-                              border:`1px solid ${T.border}`, background:T.card,
-                              cursor:"pointer", display:"flex", alignItems:"center",
-                              justifyContent:"center", color:T.red, fontSize:13 }}>×</button>
+                              border:`1px solid ${T.border}`, background: isViewer ? T.border : T.card,
+                              cursor: isViewer ? "not-allowed" : "pointer", display:"flex", alignItems:"center",
+                              justifyContent:"center", color: isViewer ? T.muted : T.red, fontSize:13 }}>×</button>
                         )}
                       </div>
                     </td>
@@ -520,61 +540,312 @@ function CampaignsList({ onNew, onView }) {
 /* ─────────────────────────────────────────────
    SCREEN 2 — CAMPAIGN WIZARD (4 steps)
 ───────────────────────────────────────────── */
+/* ─────────────────────────────────────────────
+   SCREEN 2 — CAMPAIGN WIZARD (5 steps)
+───────────────────────────────────────────── */
 const WIZARD_STEPS = [
-  { num:1, label:"Details",    sub:"Name & template"    },
-  { num:2, label:"Audience",   sub:"Choose contacts"    },
-  { num:3, label:"Personalise",sub:"Map variables"      },
-  { num:4, label:"Review",     sub:"Schedule & launch"  },
+  { num:1, label:"Setup",      sub:"Name & template"    },
+  { num:2, label:"Audience",   sub:"Select & exclude"   },
+  { num:3, label:"Template UI",sub:"Live WA preview"    },
+  { num:4, label:"Schedule",   sub:"Timezone & throttle"},
+  { num:5, label:"Launch",     sub:"Review & launch"    },
+];
+
+const TIMEZONES = [
+  "UTC",
+  "Asia/Kolkata",
+  "America/New_York",
+  "Europe/London",
+  "Asia/Singapore",
+  "Asia/Dubai",
+  "America/Los_Angeles",
+  "Europe/Paris",
+  "Australia/Sydney",
+  "Africa/Johannesburg"
 ];
 
 function CampaignWizard({ onBack, onLaunch }) {
+  const { user } = useAuthStore();
+  const isAgent = user?.role === 'agent';
+
   const [step, setStep]           = useState(1);
   const [form, setForm]           = useState({
     name:         "",
     description:  "",
     templateId:   null,
-    contactLists: [],
-    targetGroups: [],
-    targetTags: [],
-    selectAll: false,
-    sendRate:     60,
+    contactLists: [], // targeted lists/tags
+    targetGroups: [], // targeted groups
+    targetTags: [],   // targeted tags
+    exclusionGroups: [],
+    exclusionTags: [],
+    targetContacts: [],
+    exclusionContacts: [],
+    selectAll:    false,
+    sendRate:     30,
     varMap:       {},
     scheduleNow:  true,
     scheduleDate: "",
     scheduleTime: "",
+    timezone:     "Asia/Kolkata",
+    channel:      "WhatsApp",
+    categoryTag:  "Marketing",
+    internalNotes: ""
   });
+
   const [launching, setLaunching] = useState(false);
   const [launched, setLaunched]   = useState(false);
+  
+  // Loading & State
   const [templates, setTemplates] = useState([]);
   const [loadingTemplates, setLoadingTemplates] = useState(false);
   const [templatesError, setTemplatesError] = useState('');
 
-  const [contactLists, setContactLists] = useState([]);
+  const [contactLists, setContactLists] = useState([]); // will hold tags & lists
   const [loadingContactLists, setLoadingContactLists] = useState(false);
-  const [contactListsError, setContactListsError] = useState('');
-
+  
+  const [contactGroups, setContactGroups] = useState([]); // will hold groups
   const [contactFields, setContactFields] = useState(CONTACT_FIELDS);
-  const [loadingContactFields, setLoadingContactFields] = useState(false);
-  const [contactFieldsError, setContactFieldsError] = useState('');
 
-  const [contactGroups, setContactGroups] = useState([]);
+  // Name duplicate check state
+  const [nameChecked, setNameChecked] = useState(false);
+  const [nameExists, setNameExists] = useState(false);
+  const [nameSuggestions, setNameSuggestions] = useState([]);
+
+  // Live audience estimation state
+  const [estimation, setEstimation] = useState({
+    totalRecipients: 0,
+    duplicatesRemoved: 0,
+    optedOutExcluded: 0,
+    estimatedMessageCount: 0
+  });
+  const [estimating, setEstimating] = useState(false);
+  const [estimationError, setEstimationError] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
+  const [activeAudienceTab, setActiveAudienceTab] = useState('groups');
+  const [allContacts, setAllContacts] = useState([]);
+  const [loadingContacts, setLoadingContacts] = useState(false);
+  const [contactSearch, setContactSearch] = useState('');
 
   const [launchError, setLaunchError] = useState('');
 
-  // templates, contact lists, and contact fields are fetched as the user moves through steps
+  // Fetch templates when step === 1
+  useEffect(() => {
+    let mounted = true;
+    if (step !== 1) return undefined;
+    setTemplatesError('');
+    setLoadingTemplates(true);
+    templatesAPI.list({ status: 'approved' })
+      .then(res => {
+        if (!mounted) return;
+        const templatesArr = (res && res.data && res.data.data && res.data.data.templates) || (res && res.data && res.data.templates) || [];
+        setTemplates(Array.isArray(templatesArr) ? templatesArr : []);
+      })
+      .catch(err => {
+        console.error('templates fetch error', err);
+        setTemplates([]);
+        setTemplatesError('Failed to load templates. Please try again.');
+      })
+      .finally(() => {
+        if (mounted) setLoadingTemplates(false);
+      });
+    return () => { mounted = false };
+  }, [step]);
 
-  // contact lists are returned from the API as groups: { id, name, count, optIn }
+  // Debounced Campaign Name duplicate validation
+  useEffect(() => {
+    if (!form.name.trim()) {
+      setNameExists(false);
+      setNameSuggestions([]);
+      return;
+    }
 
-  const selectedTemplate = templates.find(t => (t.id && t.id === form.templateId) || (t._id && t._id === form.templateId) || (t.id && String(t.id) === String(form.templateId)) || (t._id && String(t._id) === String(form.templateId)));
-  const selectedLists    = contactLists.filter(l => form.contactLists.includes(l.id) || form.targetTags.includes(l.id));
-  const selectedGroups   = contactGroups.filter(g => form.targetGroups.includes(g._id || g.id));
-  
-  const totalContacts    = form.selectAll ? 'All' : (selectedLists.reduce((s, l) => s + (l.optIn || 0), 0) + selectedGroups.reduce((s, g) => s + (g.optIn || 0), 0));
+    const handler = setTimeout(() => {
+      api.get(`/campaigns/check-name?name=${encodeURIComponent(form.name.trim())}`)
+        .then(res => {
+          const exists = res?.data?.data?.exists ?? res?.data?.exists;
+          if (exists) {
+            setNameExists(true);
+            const dateStr = new Date().toLocaleDateString().replace(/\//g, '-');
+            setNameSuggestions([
+              `${form.name.trim()} - Copy`,
+              `${form.name.trim()} - ${dateStr}`,
+              `${form.name.trim()} v2`
+            ]);
+          } else {
+            setNameExists(false);
+            setNameSuggestions([]);
+          }
+          setNameChecked(true);
+        })
+        .catch(err => {
+          console.error("check name duplicate error:", err);
+        });
+    }, 400);
+
+    return () => clearTimeout(handler);
+  }, [form.name]);
+
+  // Fetch contact groups, lists and tags when step === 2
+  useEffect(() => {
+    let mounted = true;
+    if (step !== 2) return undefined;
+    setLoadingContactLists(true);
+    
+    // Get Contact Lists & Tags
+    api.get('/contacts/lists')
+      .then(res => {
+        if (!mounted) return;
+        const groups = (res && res.data && res.data.data && res.data.data.groups) || (res && res.data && res.data.groups) || [];
+        setContactLists(Array.isArray(groups) ? groups : []);
+      })
+      .catch(console.error)
+      .finally(() => { if (mounted) setLoadingContactLists(false); });
+
+    // Get Contact Groups
+    api.get('/contact-groups')
+      .then(res => {
+        if (!mounted) return;
+        setContactGroups(res?.data?.data?.groups || []);
+      })
+      .catch(console.error);
+
+    // Get all individual contacts
+    setLoadingContacts(true);
+    api.get('/contacts?limit=250')
+      .then(res => {
+        if (!mounted) return;
+        const cts = res?.data?.data?.contacts || res?.data?.contacts || [];
+        setAllContacts(Array.isArray(cts) ? cts : []);
+      })
+      .catch(console.error)
+      .finally(() => { if (mounted) setLoadingContacts(false); });
+
+    return () => { mounted = false };
+  }, [step]);
+
+  // Real-time live audience estimation when targets/exclusions change
+  useEffect(() => {
+    if (step !== 2) return;
+
+    const payload = {
+      contactListIds: form.contactLists,
+      targetGroups: form.targetGroups,
+      targetTags: form.targetTags,
+      exclusionGroups: form.exclusionGroups,
+      exclusionTags: form.exclusionTags,
+      targetContacts: form.targetContacts,
+      exclusionContacts: form.exclusionContacts
+    };
+
+    setEstimating(true);
+    setEstimationError(false);
+    const handler = setTimeout(() => {
+      api.post('/campaigns/estimate-audience', payload)
+        .then(res => {
+          if (res?.data?.success && res.data.data) {
+            setEstimation(res.data.data);
+            setEstimationError(false);
+          } else {
+            setEstimationError(true);
+          }
+        })
+        .catch(err => {
+          console.error("estimate audience error:", err);
+          setEstimationError(true);
+        })
+        .finally(() => {
+          setEstimating(false);
+        });
+    }, 300);
+
+    return () => clearTimeout(handler);
+  }, [form.contactLists, form.targetGroups, form.targetTags, form.exclusionGroups, form.exclusionTags, form.targetContacts, form.exclusionContacts, step, retryCount]);
+
+  // Fetch contact fields when user reaches Step 3
+  useEffect(() => {
+    let mounted = true;
+    if (step !== 3) return undefined;
+    api.get('/contacts/fields')
+      .then(res => {
+        if (!mounted) return;
+        const fields = (res && res.data && res.data.data && res.data.data.fields) || (res && res.data && res.data.fields) || [];
+        setContactFields(Array.isArray(fields) && fields.length ? fields : CONTACT_FIELDS);
+      })
+      .catch(err => {
+        console.error('contact fields error', err);
+        setContactFields(CONTACT_FIELDS);
+      });
+    return () => { mounted = false };
+  }, [step]);
+
+  const selectedTemplate = templates.find(t => String(t.id || t._id) === String(form.templateId));
+
+  const toggleTargetGroup = (id) => {
+    setForm(f => ({
+      ...f, selectAll: false,
+      targetGroups: f.targetGroups.includes(id) ? f.targetGroups.filter(x => x !== id) : [...f.targetGroups, id],
+      // Remove from exclusions if targeted
+      exclusionGroups: f.exclusionGroups.filter(x => x !== id)
+    }));
+  };
+
+  const toggleTargetTag = (id) => {
+    setForm(f => ({
+      ...f, selectAll: false,
+      targetTags: f.targetTags.includes(id) ? f.targetTags.filter(x => x !== id) : [...f.targetTags, id],
+      exclusionTags: f.exclusionTags.filter(x => x !== id)
+    }));
+  };
+
+  const toggleExclusionGroup = (id) => {
+    setForm(f => ({
+      ...f, selectAll: false,
+      exclusionGroups: f.exclusionGroups.includes(id) ? f.exclusionGroups.filter(x => x !== id) : [...f.exclusionGroups, id],
+      // Remove from target groups if excluded
+      targetGroups: f.targetGroups.filter(x => x !== id)
+    }));
+  };
+
+  const toggleExclusionTag = (id) => {
+    setForm(f => ({
+      ...f, selectAll: false,
+      exclusionTags: f.exclusionTags.includes(id) ? f.exclusionTags.filter(x => x !== id) : [...f.exclusionTags, id],
+      targetTags: f.targetTags.filter(x => x !== id)
+    }));
+  };
+
+  const toggleTargetContact = (id) => {
+    setForm(f => ({
+      ...f, selectAll: false,
+      targetContacts: f.targetContacts.includes(id) ? f.targetContacts.filter(x => x !== id) : [...f.targetContacts, id],
+      // Remove from exclusions if targeted
+      exclusionContacts: f.exclusionContacts.filter(x => x !== id)
+    }));
+  };
+
+  const toggleExclusionContact = (id) => {
+    setForm(f => ({
+      ...f, selectAll: false,
+      exclusionContacts: f.exclusionContacts.includes(id) ? f.exclusionContacts.filter(x => x !== id) : [...f.exclusionContacts, id],
+      // Remove from targets if excluded
+      targetContacts: f.targetContacts.filter(x => x !== id)
+    }));
+  };
 
   const canNext = () => {
-    if (step === 1) return form.name.trim() && form.templateId;
-    if (step === 2) return form.selectAll || form.targetGroups.length > 0 || form.targetTags.length > 0 || form.contactLists.length > 0;
+    if (step === 1) return form.name.trim() && form.templateId && !nameExists;
+    if (step === 2) {
+      const selectedAny = form.targetGroups.length > 0 || form.targetTags.length > 0 || form.contactLists.length > 0 || (form.targetContacts && form.targetContacts.length > 0);
+      if (isAgent && estimation.totalRecipients > 100) return false;
+      return selectedAny && estimation.totalRecipients > 0 && !estimating && !estimationError;
+    }
     if (step === 3) return true;
+    if (step === 4) {
+      if (!form.scheduleNow) {
+        return form.scheduleDate && form.scheduleTime && form.timezone;
+      }
+      return true;
+    }
     return true;
   };
 
@@ -584,10 +855,16 @@ function CampaignWizard({ onBack, onLaunch }) {
     try {
       const payload = {
         name: form.name,
+        description: form.description || form.internalNotes || '',
         templateId: selectedTemplate ? (selectedTemplate._id || selectedTemplate.id || selectedTemplate) : null,
         contactListIds: form.contactLists,
         targetGroups: form.targetGroups,
         targetTags: form.targetTags,
+        exclusionGroups: form.exclusionGroups,
+        exclusionTags: form.exclusionTags,
+        targetContacts: form.targetContacts,
+        exclusionContacts: form.exclusionContacts,
+        timezone: form.timezone,
         selectAll: form.selectAll,
         sendRate: form.sendRate,
         varMap: form.varMap || {},
@@ -615,140 +892,61 @@ function CampaignWizard({ onBack, onLaunch }) {
     }
   };
 
-  // Fetch templates when user reaches Step 1
-  useEffect(() => {
-    let mounted = true;
-    if (step !== 1) return undefined;
-    setTemplatesError('');
-    setLoadingTemplates(true);
-    templatesAPI.list({ status: 'approved' })
-      .then(res => {
-        if (!mounted) return;
-        const templatesArr = (res && res.data && res.data.data && res.data.data.templates) || (res && res.data && res.data.templates) || [];
-        setTemplates(Array.isArray(templatesArr) ? templatesArr : []);
-      })
-      .catch(err => {
-        console.error('templates fetch error', err);
-        setTemplates([]);
-        setTemplatesError('Failed to load templates. Please try again.');
-      })
-      .finally(() => {
-        if (mounted) setLoadingTemplates(false);
-      });
-    return () => { mounted = false };
-  }, [step]);
+  // Helper: Live render WhatsApp message template text
+  const renderMessageBody = () => {
+    if (!selectedTemplate) return "Select a template in Step 1 to preview your message.";
+    
+    // Find body component
+    const bodyComp = (selectedTemplate.components || []).find(c => c.type === 'BODY');
+    if (!bodyComp || !bodyComp.text) return "No body component in template";
 
-  // If exactly one approved template exists, auto-select it for convenience
-  useEffect(() => {
-    if (step === 1 && !loadingTemplates && Array.isArray(templates) && templates.length === 1 && !form.templateId) {
-      const t = templates[0];
-      const templateId = t.id || t._id || 0;
-      setForm(f => ({ ...f, templateId: templateId, varMap: {} }));
-    }
-  }, [step, loadingTemplates, templates, form.templateId]);
+    let text = bodyComp.text;
+    
+    // Replace {{1}}, {{2}}... with mapped variables in real-time
+    const vars = selectedTemplate.variables || [];
+    vars.forEach((v, index) => {
+      const mapping = form.varMap[v] || `{{${index + 1}}}`;
+      text = text.replace(new RegExp(`\\{\\{${index + 1}\\}\\}`, 'g'), `[${mapping}]`);
+    });
 
-  // Fetch contact lists when user reaches Step 2
-  useEffect(() => {
-    let mounted = true;
-    if (step !== 2) return undefined;
-    setContactListsError('');
-    setLoadingContactLists(true);
-    api.get('/contacts/lists')
-      .then(res => {
-        if (!mounted) return;
-        const groups = (res && res.data && res.data.data && res.data.data.groups) || (res && res.data && res.data.groups) || [];
-        setContactLists(Array.isArray(groups) ? groups : []);
-      })
-      .catch(err => {
-        console.error('contact lists error', err);
-        setContactLists([]);
-        setContactListsError('Failed to load tags. Please try again.');
-      })
-      .finally(() => { if (mounted) setLoadingContactLists(false); });
-
-    api.get('/contact-groups').then(res => {
-      if (!mounted) return;
-      setContactGroups(res?.data?.data?.groups || []);
-    }).catch(console.error);
-
-    return () => { mounted = false };
-  }, [step]);
-
-  // Fetch contact fields when user reaches Step 3
-  useEffect(() => {
-    let mounted = true;
-    if (step !== 3) return undefined;
-    setContactFieldsError('');
-    setLoadingContactFields(true);
-    api.get('/contacts/fields')
-      .then(res => {
-        if (!mounted) return;
-        const fields = (res && res.data && res.data.data && res.data.data.fields) || (res && res.data && res.data.fields) || [];
-        setContactFields(Array.isArray(fields) && fields.length ? fields : CONTACT_FIELDS);
-      })
-      .catch(err => {
-        console.error('contact fields error', err);
-        setContactFields(CONTACT_FIELDS);
-        setContactFieldsError('Failed to load contact fields.');
-      })
-      .finally(() => { if (mounted) setLoadingContactFields(false); });
-    return () => { mounted = false };
-  }, [step]);
-
-  const toggleList = (id) => {
-    setForm(f => ({
-      ...f,
-      selectAll: false,
-      contactLists: f.contactLists.includes(id)
-        ? f.contactLists.filter(x => x !== id)
-        : [...f.contactLists, id]
-    }));
+    return text;
   };
 
-  const toggleSelectAll = () => setForm(f => ({ ...f, selectAll: !f.selectAll, targetGroups: [], targetTags: [], contactLists: [] }));
-  const toggleGroup = (id) => {
-    setForm(f => ({
-      ...f, selectAll: false,
-      targetGroups: f.targetGroups.includes(id) ? f.targetGroups.filter(x => x !== id) : [...f.targetGroups, id]
-    }));
-  };
-  const toggleTag = (id) => {
-    setForm(f => ({
-      ...f, selectAll: false,
-      targetTags: f.targetTags.includes(id) ? f.targetTags.filter(x => x !== id) : [...f.targetTags, id]
-    }));
+  const getHeaderComponent = () => {
+    if (!selectedTemplate) return null;
+    return (selectedTemplate.components || []).find(c => c.type === 'HEADER');
   };
 
-  // ── Success screen
+  const getFooterComponent = () => {
+    if (!selectedTemplate) return null;
+    return (selectedTemplate.components || []).find(c => c.type === 'FOOTER');
+  };
+
+  const getButtonsComponent = () => {
+    if (!selectedTemplate) return null;
+    return (selectedTemplate.components || []).find(c => c.type === 'BUTTONS');
+  };
+
+  // Success Screen
   if (launched) {
     return (
-      <div style={{ flex:1, display:"flex", flexDirection:"column",
-        alignItems:"center", justifyContent:"center", padding:"40px 24px" }}>
-        <div style={{ width:72, height:72, borderRadius:"50%", background:T.greenLight,
-          display:"flex", alignItems:"center", justifyContent:"center", marginBottom:20 }}>
-          <svg width="32" height="32" fill="none" viewBox="0 0 24 24"
-            stroke={T.green} strokeWidth="2.5">
+      <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"40px 24px" }}>
+        <div style={{ width:72, height:72, borderRadius:"50%", background:T.greenLight, display:"flex", alignItems:"center", justifyContent:"center", marginBottom:20 }}>
+          <svg width="32" height="32" fill="none" viewBox="0 0 24 24" stroke={T.green} strokeWidth="2.5">
             <polyline points="20 6 9 17 4 12"/>
           </svg>
         </div>
         <div style={{ fontSize:22, fontWeight:700, color:T.text, marginBottom:8 }}>
-          Campaign launched! 🚀
+          Campaign launched successfully! 🚀
         </div>
-        <div style={{ fontSize:14, color:T.muted, textAlign:"center", marginBottom:32,
-          maxWidth:400, lineHeight:1.6 }}>
-          <strong style={{ color:T.text }}>{form.name}</strong> is now running.{" "}
-          {totalContacts.toLocaleString()} contacts are being messaged at{" "}
-          {form.sendRate} messages/minute.
+        <div style={{ fontSize:14, color:T.muted, textAlign:"center", marginBottom:32, maxWidth:400, lineHeight:1.6 }}>
+          <strong style={{ color:T.text }}>{form.name}</strong> is now running. {estimation.totalRecipients.toLocaleString()} contacts will be messaged at {form.sendRate} messages/minute.
         </div>
         <div style={{ display:"flex", gap:10 }}>
-          <button onClick={onBack}
-            style={{ padding:"10px 20px", borderRadius:9, border:`1px solid ${T.border}`,
-              background:T.card, fontSize:13, color:T.text, cursor:"pointer" }}>
+          <button onClick={onBack} style={{ padding:"10px 20px", borderRadius:9, border:`1px solid ${T.border}`, background:T.card, fontSize:13, color:T.text, cursor:"pointer" }}>
             Back to campaigns
           </button>
-          <button onClick={onLaunch}
-            style={{ padding:"10px 20px", borderRadius:9, border:"none",
-              background:T.green, color:"#fff", fontSize:13, fontWeight:600, cursor:"pointer" }}>
+          <button onClick={() => onLaunch()} style={{ padding:"10px 20px", borderRadius:9, border:"none", background:T.green, color:"#fff", fontSize:13, fontWeight:600, cursor:"pointer" }}>
             View live stats →
           </button>
         </div>
@@ -759,74 +957,132 @@ function CampaignWizard({ onBack, onLaunch }) {
   return (
     <div style={{ flex:1, display:"flex", flexDirection:"column", minHeight:0, overflow:"hidden", background: '#F0F4F8' }}>
       <Topbar
-        title="New Campaign"
-        subtitle="4 steps to launch"
+        title="Enterprise Campaign Builder"
+        subtitle={`Step ${step} of 5 · HubSpot Grade WhatsApp Marketing Orchestrator`}
         actions={
-          <button onClick={onBack}
-            style={{ padding:"8px 16px", borderRadius:8, border:`1px solid ${T.border}`, background:T.card, fontSize:14, color:T.text, cursor:"pointer" }}>
+          <button onClick={onBack} style={{ padding:"8px 16px", borderRadius:8, border:`1px solid ${T.border}`, background:T.card, fontSize:14, color:T.text, cursor:"pointer" }}>
             Cancel
           </button>
         }
       />
 
-      <div style={{ flex:1, overflowY:"auto", padding:"32px 24px", width:"100%" }}>
-
-        {/* STEP INDICATOR */}
-        <div style={{ display:"flex", alignItems:"flex-start", marginBottom:40, maxWidth:640, margin:'0 auto 40px' }}>
+      <div style={{ flex:1, overflowY:"auto", padding:"24px 20px" }}>
+        
+        {/* STEP PROGRESS TRACKER */}
+        <div style={{ display:"flex", alignItems:"flex-start", marginBottom:30, maxWidth:800, margin:'0 auto 30px' }}>
           {WIZARD_STEPS.map((s, i) => {
             const done   = s.num < step;
             const active = s.num === step;
             return (
               <React.Fragment key={s.num}>
-                <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:8, zIndex:2, width: 80 }}>
-                  <div style={{ width:40, height:40, borderRadius:"50%", display:"flex",
-                    alignItems:"center", justifyContent:"center", fontSize:15, fontWeight:600,
-                    flexShrink:0, border: active || done ? '2px solid #10B981' : `2px solid ${T.borderMid}`,
-                    background: '#fff',
-                    color: active || done ? '#10B981' : T.subtle,
-                    transition:"all .3s" }}>
-                    {s.num}
+                <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:6, zIndex:2, width: 90 }}>
+                  <div style={{ width:36, height:36, borderRadius:"50%", display:"flex",
+                    alignItems:"center", justifyContent:"center", fontSize:14, fontWeight:700,
+                    flexShrink:0, border: active || done ? '2.5px solid #10B981' : `2.5px solid ${T.borderMid}`,
+                    background: active ? '#D1FAE5' : done ? '#10B981' : '#fff',
+                    color: active ? '#047857' : done ? '#fff' : T.subtle,
+                    transition:"all .25s" }}>
+                    {done ? "✓" : s.num}
                   </div>
                   <div style={{ textAlign:"center", whiteSpace: 'nowrap' }}>
-                    <div style={{ fontSize:14, fontWeight: 700, color: active ? T.text : T.muted }}>{s.label}</div>
-                    <div style={{ fontSize:12, color:T.subtle }}>{s.sub}</div>
+                    <div style={{ fontSize:12, fontWeight: 700, color: active ? T.text : T.muted }}>{s.label}</div>
+                    <div style={{ fontSize:10, color:T.subtle }}>{s.sub}</div>
                   </div>
                 </div>
                 {i < WIZARD_STEPS.length-1 && (
-                  <div style={{ flex:1, height:2, marginTop:20, margin: '20px 8px 0',
+                  <div style={{ flex:1, height:3, marginTop:18, margin: '18px 6px 0',
                     background: done ? '#10B981' : T.border,
-                    transition:"background .3s", zIndex:1 }} />
+                    transition:"background .25s", zIndex:1 }} />
                 )}
               </React.Fragment>
             );
           })}
         </div>
 
-        {/* ── STEP 1: DETAILS ── */}
+        {/* ── STEP 1: CAMPAIGN SETUP ── */}
         {step === 1 && (
-          <div style={{ display:"flex", flexDirection:"column", gap:16, maxWidth: 640, margin: '0 auto' }}>
-            
-            {/* Campaign Name Card */}
+          <div style={{ display:"flex", flexDirection:"column", gap:16, maxWidth: 700, margin: '0 auto' }}>
             <div style={{ background:T.card, borderRadius:12, border:`1px solid ${T.border}`, padding:"24px" }}>
               <div style={{ fontSize:16, fontWeight:700, color:T.text, marginBottom:16 }}>
-                Campaign name
+                Campaign properties
               </div>
-              <input value={form.name}
-                  onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-                  placeholder="e.g. Holi Sale 2025"
-                  aria-label="Campaign name"
-                  style={{ width:"100%", padding:"14px 16px", borderRadius:8,
-                    border:`1px solid ${T.border}`, fontSize:15, color:T.text,
-                    fontFamily:T.font, outline:"none", boxSizing: 'border-box' }} />
+              
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+                <div>
+                  <label style={{ display:'block', fontSize:12, fontWeight:600, color:T.muted, marginBottom:6 }}>Campaign Name</label>
+                  <input value={form.name}
+                      onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+                      placeholder="e.g. Holi VIP Offer 2025"
+                      aria-label="Campaign name"
+                      style={{ width:"100%", padding:"12px 14px", borderRadius:8,
+                        border:`1px solid ${nameExists ? T.red : T.border}`, fontSize:14, color:T.text,
+                        fontFamily:T.font, outline:"none", boxSizing: 'border-box' }} />
+                </div>
+                <div>
+                  <label style={{ display:'block', fontSize:12, fontWeight:600, color:T.muted, marginBottom:6 }}>Channel</label>
+                  <select value={form.channel}
+                      onChange={e => setForm(f => ({ ...f, channel: e.target.value }))}
+                      style={{ width:"100%", padding:"12px 14px", borderRadius:8,
+                        border:`1px solid ${T.border}`, fontSize:14, color:T.text,
+                        fontFamily:T.font, outline:"none", boxSizing: 'border-box', background: '#F8FAFC' }}>
+                    <option value="WhatsApp">WhatsApp Message Blast</option>
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+                <div>
+                  <label style={{ display:'block', fontSize:12, fontWeight:600, color:T.muted, marginBottom:6 }}>Category Tag</label>
+                  <select value={form.categoryTag}
+                      onChange={e => setForm(f => ({ ...f, categoryTag: e.target.value }))}
+                      style={{ width:"100%", padding:"12px 14px", borderRadius:8,
+                        border:`1px solid ${T.border}`, fontSize:14, color:T.text,
+                        fontFamily:T.font, outline:"none", boxSizing: 'border-box', background: '#fff' }}>
+                    <option value="Marketing">Marketing / Promotional</option>
+                    <option value="Transactional">Transactional / Alert</option>
+                    <option value="Newsletter">Monthly Newsletter</option>
+                    <option value="Other">Other Blast</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={{ display:'block', fontSize:12, fontWeight:600, color:T.muted, marginBottom:6 }}>Internal Notes</label>
+                  <input value={form.internalNotes}
+                      onChange={e => setForm(f => ({ ...f, internalNotes: e.target.value }))}
+                      placeholder="Optional internal context for team"
+                      style={{ width:"100%", padding:"12px 14px", borderRadius:8,
+                        border:`1px solid ${T.border}`, fontSize:14, color:T.text,
+                        fontFamily:T.font, outline:"none", boxSizing: 'border-box' }} />
+                </div>
+              </div>
+
+              {/* Duplicate warnings & suggestions */}
+              {nameExists && (
+                <div style={{ marginTop: 12, padding: 12, background: T.redLight, borderRadius: 8, border: `1px solid ${T.red}` }}>
+                  <div style={{ fontSize: 13, color: T.red, fontWeight: 700, marginBottom: 4 }}>
+                    ⚠️ A campaign with this name already exists.
+                  </div>
+                  <div style={{ fontSize: 12, color: T.muted }}>
+                    Try these smart suggested alternatives:
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                    {nameSuggestions.map(sug => (
+                      <button key={sug} onClick={() => setForm(f => ({ ...f, name: sug }))}
+                        style={{ padding: '4px 8px', borderRadius: 6, border: `1px solid ${T.border}`, background: '#fff', fontSize: 11, cursor: 'pointer', color: T.text }}>
+                        {sug}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Select Template Card */}
-            <div style={{ background:T.card, borderRadius:12, border:`1px solid ${T.border}`, padding:"24px", marginBottom: 16 }}>
+            <div style={{ background:T.card, borderRadius:12, border:`1px solid ${T.border}`, padding:"24px" }}>
               <div style={{ fontSize:16, fontWeight:700, color:T.text, marginBottom:4 }}>
-                Select template
+                Approved templates
               </div>
-              <div style={{ fontSize:14, color:T.subtle, marginBottom:20 }}>
-                Only approved templates shown
+              <div style={{ fontSize:12, color:T.subtle, marginBottom:20 }}>
+                Select a Meta-approved message template for this broadcast.
               </div>
               
               <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
@@ -849,31 +1105,31 @@ function CampaignWizard({ onBack, onLaunch }) {
                       <div key={templateId} role="button" tabIndex={0}
                         onClick={() => setForm(f => ({ ...f, templateId: templateId, varMap: {} }))}
                         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setForm(f => ({ ...f, templateId: templateId, varMap: {} })); }}
-                        style={{ display:"flex", alignItems:"center", gap:16, padding:"16px 20px",
-                          borderRadius:10, border: sel ? `1.5px solid #10B981` : `1px solid ${T.border}`,
+                        style={{ display:"flex", alignItems:"center", gap:16, padding:"14px 18px",
+                          borderRadius:10, border: sel ? `2px solid #10B981` : `1px solid ${T.border}`,
                           background: '#fff', cursor:"pointer",
                           transition:"all .15s" }}>
 
-                        <div style={{ width:22, height:22, borderRadius:"50%", flexShrink:0,
+                        <div style={{ width:20, height:20, borderRadius:"50%", flexShrink:0,
                           border:`2px solid ${sel ? '#10B981' : T.borderMid}`,
                           display:"flex", alignItems:"center", justifyContent:"center" }}>
-                          {sel && <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#10B981' }} />}
+                          {sel && <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#10B981' }} />}
                         </div>
 
                         <div style={{ flex:1, minWidth:0 }}>
-                          <div style={{ fontSize:15, fontWeight:700, color: T.text }}>{t.name || t.title}</div>
+                          <div style={{ fontSize:14, fontWeight:700, color: T.text }}>{t.name || t.title}</div>
                           <div style={{ display:"flex", gap:6, marginTop:4, alignItems: 'center' }}>
-                            <span style={{ fontSize:12, fontWeight:600, color:catColor }}>
+                            <span style={{ fontSize:11, fontWeight:600, color:catColor }}>
                               {t.category || 'MARKETING'}
                             </span>
-                            <span style={{ color:T.subtle, fontSize: 13 }}>·</span>
-                            <span style={{ fontSize:12, color:catColor }}>
-                              {(t.variables || []).length} vars
+                            <span style={{ color:T.subtle, fontSize: 12 }}>·</span>
+                            <span style={{ fontSize:11, color: T.muted }}>
+                              {(t.variables || []).length} variables
                             </span>
                           </div>
                         </div>
 
-                        <span style={{ fontSize:11, fontWeight:700, padding:"6px 14px",
+                        <span style={{ fontSize:10, fontWeight:700, padding:"4px 10px",
                           borderRadius:20, background:'#D1FAE5', color:'#065F46', letterSpacing: '0.05em' }}>
                           APPROVED
                         </span>
@@ -884,242 +1140,635 @@ function CampaignWizard({ onBack, onLaunch }) {
               </div>
             </div>
 
-            {/* Step 1 Footer */}
+            {/* Wizard Navigation */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 8, paddingBottom: 40 }}>
               <button onClick={onBack} style={{ padding: '12px 24px', borderRadius: 8, background: '#fff', border: `1px solid ${T.border}`, fontSize: 14, fontWeight: 500, color: T.text, cursor: 'pointer' }}>Cancel</button>
-              <div style={{ fontSize: 14, color: T.subtle }}>Step 1 of 4</div>
+              <div style={{ fontSize: 14, color: T.subtle }}>Step 1 of 5</div>
               <button 
                 onClick={() => setStep(2)} 
                 disabled={!canNext()} 
-                style={{ padding: '12px 24px', borderRadius: 8, background: canNext() ? '#3B82F6' : '#E2E8F0', color: canNext() ? '#fff' : '#94A3B8', border: 'none', fontSize: 14, fontWeight: 600, cursor: canNext() ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', gap: 8 }}>
+                style={{ padding: '12px 24px', borderRadius: 8, background: canNext() ? '#2563EB' : '#E2E8F0', color: canNext() ? '#fff' : '#94A3B8', border: 'none', fontSize: 14, fontWeight: 600, cursor: canNext() ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', gap: 8 }}>
                 Continue <span>→</span>
               </button>
             </div>
           </div>
         )}
 
-        {/* ── STEP 2: AUDIENCE ── */}
+        {/* ── STEP 2: AUDIENCE SELECTION ── */}
         {step === 2 && (
-          <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
-            <div style={{ background:T.card, borderRadius:12, border:`1px solid ${T.border}`, padding:"20px" }}>
-              <div style={{ fontSize:14, fontWeight:700, color:T.text, marginBottom:4 }}>Select contact audience</div>
-              <div style={{ fontSize:11, color:T.subtle, marginBottom:16 }}>Choose groups or tags to target. Only opted-in contacts will receive messages.</div>
-              
-              <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-                {/* Select All */}
-                <div role="button" tabIndex={0} onClick={toggleSelectAll} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggleSelectAll(); }}
-                  style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 14px", borderRadius:10, border:`2px solid ${form.selectAll ? T.blue : T.border}`, background: form.selectAll ? T.blueLight : T.card, cursor:"pointer", transition:"all .15s" }}>
-                  <div style={{ width:20, height:20, borderRadius:4, flexShrink:0, border:`2px solid ${form.selectAll ? T.blue : T.border}`, background: form.selectAll ? T.blue : T.card, display:"flex", alignItems:"center", justifyContent:"center" }}>
-                    {form.selectAll && <span style={{ color:"#fff", fontSize:12, fontWeight:700 }}>✓</span>}
-                  </div>
-                  <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ fontSize:13, fontWeight:600, color: form.selectAll ? T.blue : T.text }}>All Contacts</div>
-                    <div style={{ fontSize:11, color:T.subtle }}>Send to all opted-in contacts</div>
+          <div style={{ display:"grid", gridTemplateColumns: '3fr 2fr', gap: 20, maxWidth: 1000, margin: '0 auto' }}>
+            
+            {/* Targets & Exclusions Selection */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {/* Audience Navigation Tabs */}
+              <div style={{ display: 'flex', gap: 4, background: T.bg, padding: 4, borderRadius: 10, border: `1px solid ${T.border}` }}>
+                {[
+                  { id: 'groups', label: 'Groups' },
+                  { id: 'tags', label: 'Lists & Tags' },
+                  { id: 'individual', label: 'Manual Contacts' },
+                  { id: 'exclusions', label: 'Exclusions' }
+                ].map(tab => {
+                  const active = activeAudienceTab === tab.id;
+                  let badge = 0;
+                  if (tab.id === 'groups') badge = form.targetGroups.length;
+                  if (tab.id === 'tags') badge = form.targetTags.length;
+                  if (tab.id === 'individual') badge = form.targetContacts.length;
+                  if (tab.id === 'exclusions') badge = form.exclusionGroups.length + form.exclusionTags.length + form.exclusionContacts.length;
+
+                  return (
+                    <button
+                      key={tab.id}
+                      onClick={() => setActiveAudienceTab(tab.id)}
+                      style={{
+                        flex: 1,
+                        padding: '10px 12px',
+                        borderRadius: 8,
+                        background: active ? '#fff' : 'transparent',
+                        color: active ? '#2563EB' : T.subtle,
+                        border: 'none',
+                        fontSize: 13,
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 6,
+                        boxShadow: active ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      {tab.label}
+                      {badge > 0 && (
+                        <span style={{
+                          background: active ? '#2563EB' : T.borderMid,
+                          color: active ? '#fff' : T.text,
+                          fontSize: 10,
+                          fontWeight: 700,
+                          padding: '2px 6px',
+                          borderRadius: 10
+                        }}>
+                          {badge}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* TAB 1: GROUPS */}
+              {activeAudienceTab === 'groups' && (
+                <div style={{ background:T.card, borderRadius:12, border:`1px solid ${T.border}`, padding:"20px" }}>
+                  <div style={{ fontSize:15, fontWeight:700, color:T.text, marginBottom:4 }}>Select target groups</div>
+                  <div style={{ fontSize:12, color:T.subtle, marginBottom:16 }}>Target contacts matching these multi-tenant groups.</div>
+                  
+                  <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                    {loadingContactLists ? (
+                      <div style={{ padding:24, textAlign:'center' }}>Loading groups...</div>
+                    ) : contactGroups.length === 0 ? (
+                      <div style={{ padding:24, textAlign:'center', color: T.subtle }}>No contact groups found.</div>
+                    ) : (
+                      contactGroups.map(g => {
+                        const id = g._id || g.id;
+                        const sel = form.targetGroups.includes(id);
+                        return (
+                          <div key={id} onClick={() => toggleTargetGroup(id)}
+                            style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 16px", borderRadius:10, border:`1.5px solid ${sel ? '#10B981' : T.border}`, background: sel ? '#ECFDF5' : T.card, cursor:"pointer", transition:"all .15s" }}>
+                            <div style={{ width:18, height:18, borderRadius:4, flexShrink:0, border:`2px solid ${sel ? '#10B981' : T.border}`, background: sel ? '#10B981' : T.card, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                              {sel && <span style={{ color:"#fff", fontSize:11, fontWeight:700 }}>✓</span>}
+                            </div>
+                            <div style={{ flex:1, minWidth:0, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <span style={{ fontSize:13, fontWeight:600, color: sel ? '#065F46' : T.text }}>{g.name}</span>
+                              <span style={{ fontSize:11, color: T.muted }}>
+                                <strong style={{ color: sel ? '#047857' : T.text }}>{g.optedInCount || 0}</strong> opted-in / {g.contactCount || 0} total
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
                   </div>
                 </div>
+              )}
 
-                {loadingContactLists ? (
-                  <div style={{ padding:24, textAlign:'center' }}>Loading audience...</div>
-                ) : (
-                  <>
-                    {/* GROUPS */}
-                    {contactGroups.length > 0 && <div style={{ fontSize:12, fontWeight:600, color:T.muted, marginTop:10, marginBottom:4, textTransform:'uppercase' }}>Groups</div>}
-                    {contactGroups.map(g => {
-                      const id = g._id || g.id;
-                      const sel = form.targetGroups.includes(id);
-                      return (
-                        <div key={id} role="button" tabIndex={0} onClick={() => toggleGroup(id)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggleGroup(id); }}
-                          style={{ display:"flex", alignItems:"center", gap:12, padding:"10px 14px", borderRadius:10, border:`2px solid ${sel ? T.green : T.border}`, background: sel ? T.greenLight : T.card, cursor:"pointer", transition:"all .15s" }}>
-                          <div style={{ width:20, height:20, borderRadius:4, flexShrink:0, border:`2px solid ${sel ? T.green : T.border}`, background: sel ? T.green : T.card, display:"flex", alignItems:"center", justifyContent:"center" }}>
-                            {sel && <span style={{ color:"#fff", fontSize:12, fontWeight:700 }}>✓</span>}
+              {/* TAB 2: LISTS & TAGS */}
+              {activeAudienceTab === 'tags' && (
+                <div style={{ background:T.card, borderRadius:12, border:`1px solid ${T.border}`, padding:"20px" }}>
+                  <div style={{ fontSize:15, fontWeight:700, color:T.text, marginBottom:4 }}>Select target tags & segments</div>
+                  <div style={{ fontSize:12, color:T.subtle, marginBottom:16 }}>Target contacts matching these tags.</div>
+                  
+                  <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                    {loadingContactLists ? (
+                      <div style={{ padding:24, textAlign:'center' }}>Loading lists & tags...</div>
+                    ) : contactLists.length === 0 ? (
+                      <div style={{ padding:24, textAlign:'center', color: T.subtle }}>No lists or tags found.</div>
+                    ) : (
+                      contactLists.map(tag => {
+                        const sel = form.targetTags.includes(tag.id) || form.contactLists.includes(tag.id);
+                        return (
+                          <div key={tag.id} onClick={() => toggleTargetTag(tag.id)}
+                            style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 16px", borderRadius:10, border:`1.5px solid ${sel ? '#2563EB' : T.border}`, background: sel ? '#EFF6FF' : T.card, cursor:"pointer", transition:"all .15s" }}>
+                            <div style={{ width:18, height:18, borderRadius:4, flexShrink:0, border:`2px solid ${sel ? '#2563EB' : T.border}`, background: sel ? '#2563EB' : T.card, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                              {sel && <span style={{ color:"#fff", fontSize:11, fontWeight:700 }}>✓</span>}
+                            </div>
+                            <div style={{ flex:1, minWidth:0, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <span style={{ fontSize:13, fontWeight:600, color: sel ? '#1E40AF' : T.text }}>{tag.name}</span>
+                              <span style={{ fontSize:11, color: T.muted }}>{tag.optIn || 0} opted-in</span>
+                            </div>
                           </div>
-                          <div style={{ flex:1, minWidth:0 }}>
-                            <div style={{ fontSize:13, fontWeight:600, color: sel ? T.greenDark : T.text }}>{g.name}</div>
-                          </div>
-                        </div>
-                      );
-                    })}
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              )}
 
-                    {/* TAGS */}
-                    {contactLists.length > 0 && <div style={{ fontSize:12, fontWeight:600, color:T.muted, marginTop:10, marginBottom:4, textTransform:'uppercase' }}>Tags & Lists</div>}
-                    {contactLists.map(tag => {
-                      const sel = form.targetTags.includes(tag.id) || form.contactLists.includes(tag.id);
-                      return (
-                        <div key={tag.id} role="button" tabIndex={0} onClick={() => toggleTag(tag.id)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggleTag(tag.id); }}
-                          style={{ display:"flex", alignItems:"center", gap:12, padding:"10px 14px", borderRadius:10, border:`2px solid ${sel ? T.amber : T.border}`, background: sel ? T.amberLight : T.card, cursor:"pointer", transition:"all .15s" }}>
-                          <div style={{ width:20, height:20, borderRadius:4, flexShrink:0, border:`2px solid ${sel ? T.amber : T.border}`, background: sel ? T.amber : T.card, display:"flex", alignItems:"center", justifyContent:"center" }}>
-                            {sel && <span style={{ color:"#fff", fontSize:12, fontWeight:700 }}>✓</span>}
+              {/* TAB 3: INDIVIDUAL CONTACTS SELECTOR */}
+              {activeAudienceTab === 'individual' && (
+                <div style={{ background:T.card, borderRadius:12, border:`1px solid ${T.border}`, padding:"20px" }}>
+                  <div style={{ fontSize:15, fontWeight:700, color:T.text, marginBottom:4 }}>Target individual contacts</div>
+                  <div style={{ fontSize:12, color:T.subtle, marginBottom:16 }}>Select specific contacts to target directly in this campaign broadcast.</div>
+                  
+                  {/* Selected Contact Chips */}
+                  {form.targetContacts.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 16, padding: 12, background: T.bg, borderRadius: 10, border: `1px dashed ${T.border}` }}>
+                      {form.targetContacts.map(id => {
+                        const contactObj = allContacts.find(c => String(c._id || c.id) === String(id));
+                        const label = contactObj ? (contactObj.name || contactObj.phoneNumber) : id;
+                        return (
+                          <div key={id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', background: '#fff', border: `1px solid ${T.border}`, borderRadius: 20, fontSize: 11, fontWeight: 600, color: T.text }}>
+                            <span>{label}</span>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); toggleTargetContact(id); }}
+                              style={{ border: 'none', background: 'transparent', color: T.red, fontWeight: 700, cursor: 'pointer', padding: 0, fontSize: 13, width: 14, height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                            >
+                              ×
+                            </button>
                           </div>
-                          <div style={{ flex:1, minWidth:0 }}>
-                            <div style={{ fontSize:13, fontWeight:600, color: sel ? '#B45309' : T.text }}>{tag.name}</div>
-                            <div style={{ fontSize:11, color:T.subtle }}>{tag.optIn} opted-in</div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Search Bar */}
+                  <div style={{ position: 'relative', marginBottom: 14 }}>
+                    <input
+                      type="text"
+                      placeholder="Search contacts by name or phone..."
+                      value={contactSearch}
+                      onChange={(e) => setContactSearch(e.target.value)}
+                      style={{ width: '100%', padding: '10px 14px 10px 36px', borderRadius: 8, border: `1px solid ${T.border}`, fontSize: 13, color: T.text }}
+                    />
+                    <span style={{ position: 'absolute', left: 12, top: 11, color: T.muted }}>🔍</span>
+                    {contactSearch && (
+                      <button
+                        onClick={() => setContactSearch('')}
+                        style={{ position: 'absolute', right: 12, top: 9, border: 'none', background: 'transparent', fontSize: 14, color: T.muted, cursor: 'pointer' }}
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Contacts Table List */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 300, overflowY: 'auto' }}>
+                    {loadingContacts ? (
+                      <div style={{ padding: 24, textAlign: 'center', color: T.subtle }}>Loading contacts...</div>
+                    ) : (() => {
+                      const filtered = allContacts.filter(c => {
+                        const searchLower = contactSearch.toLowerCase().trim();
+                        if (!searchLower) return true;
+                        return (c.name || '').toLowerCase().includes(searchLower) || (c.phoneNumber || '').includes(searchLower);
+                      });
+
+                      if (filtered.length === 0) {
+                        return <div style={{ padding: 20, textAlign: 'center', color: T.subtle, fontSize: 12 }}>No matching contacts found.</div>;
+                      }
+
+                      return filtered.map(c => {
+                        const id = c._id || c.id;
+                        const sel = form.targetContacts.includes(id);
+                        const isOptedOut = c.optInStatus === 'opted_out';
+                        const isBlocked = c.isBlocked;
+
+                        return (
+                          <div
+                            key={id}
+                            onClick={() => {
+                              if (isOptedOut || isBlocked) return;
+                              toggleTargetContact(id);
+                            }}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 12,
+                              padding: '10px 14px',
+                              borderRadius: 10,
+                              border: `1.5px solid ${sel ? '#2563EB' : T.border}`,
+                              background: sel ? '#EFF6FF' : (isOptedOut || isBlocked) ? T.bg : T.card,
+                              cursor: (isOptedOut || isBlocked) ? 'not-allowed' : 'pointer',
+                              opacity: (isOptedOut || isBlocked) ? 0.6 : 1,
+                              transition: 'all 0.15s ease'
+                            }}
+                          >
+                            <div style={{
+                              width: 18,
+                              height: 18,
+                              borderRadius: 4,
+                              flexShrink: 0,
+                              border: `2px solid ${sel ? '#2563EB' : T.border}`,
+                              background: sel ? '#2563EB' : T.card,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center'
+                            }}>
+                              {sel && <span style={{ color: '#fff', fontSize: 11, fontWeight: 700 }}>✓</span>}
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: 13, fontWeight: 600, color: T.text, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <span>{c.name || 'Unnamed Contact'}</span>
+                                {isOptedOut && <span style={{ fontSize: 9, background: T.amberLight, color: T.amber, padding: '2px 6px', borderRadius: 10 }}>Opted Out</span>}
+                                {isBlocked && <span style={{ fontSize: 9, background: T.redLight, color: T.red, padding: '2px 6px', borderRadius: 10 }}>Blocked</span>}
+                              </div>
+                              <div style={{ fontSize: 11, color: T.muted, fontFamily: T.mono }}>{c.phoneNumber}</div>
+                            </div>
                           </div>
-                        </div>
-                      );
-                    })}
-                  </>
-                )}
+                        );
+                      });
+                    })()}
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 4: EXCLUSIONS */}
+              {activeAudienceTab === 'exclusions' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  {/* Groups Exclusion Card */}
+                  <div style={{ background:T.card, borderRadius:12, border:`1px solid ${T.border}`, padding:"20px" }}>
+                    <div style={{ fontSize:15, fontWeight:700, color:T.text, marginBottom:4 }}>Exclude Groups</div>
+                    <div style={{ fontSize:12, color:T.subtle, marginBottom:16 }}>Opted-in contacts matching excluded groups will be skipped.</div>
+                    
+                    <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                      {contactGroups.length === 0 ? (
+                        <div style={{ padding: 12, textAlign: 'center', color: T.subtle, fontSize: 12 }}>No groups available to exclude.</div>
+                      ) : (
+                        contactGroups.map(g => {
+                          const id = g._id || g.id;
+                          const sel = form.exclusionGroups.includes(id);
+                          return (
+                            <div key={id} onClick={() => toggleExclusionGroup(id)}
+                              style={{ display:"flex", alignItems:"center", gap:12, padding:"10px 14px", borderRadius:10, border:`1.5px solid ${sel ? T.red : T.border}`, background: sel ? T.redLight : T.card, cursor:"pointer", transition:"all .15s" }}>
+                              <div style={{ width:18, height:18, borderRadius:4, flexShrink:0, border:`2px solid ${sel ? T.red : T.border}`, background: sel ? T.red : T.card, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                                {sel && <span style={{ color:"#fff", fontSize:11, fontWeight:700 }}>✓</span>}
+                              </div>
+                              <div style={{ flex:1, minWidth:0, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <span style={{ fontSize:13, fontWeight:600, color: sel ? T.red : T.text }}>{g.name}</span>
+                                <span style={{ fontSize:11, color: T.muted }}>{g.optedInCount || g.contactCount || 0} contacts</span>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Lists & Tags Exclusion Card */}
+                  <div style={{ background:T.card, borderRadius:12, border:`1px solid ${T.border}`, padding:"20px" }}>
+                    <div style={{ fontSize:15, fontWeight:700, color:T.text, marginBottom:4 }}>Exclude Lists & Tags</div>
+                    <div style={{ fontSize:12, color:T.subtle, marginBottom:16 }}>Suppress contacts matching these tags.</div>
+                    
+                    <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                      {contactLists.length === 0 ? (
+                        <div style={{ padding: 12, textAlign: 'center', color: T.subtle, fontSize: 12 }}>No lists or tags available to exclude.</div>
+                      ) : (
+                        contactLists.map(tag => {
+                          const sel = form.exclusionTags.includes(tag.id);
+                          return (
+                            <div key={tag.id} onClick={() => toggleExclusionTag(tag.id)}
+                              style={{ display:"flex", alignItems:"center", gap:12, padding:"10px 14px", borderRadius:10, border:`1.5px solid ${sel ? T.red : T.border}`, background: sel ? T.redLight : T.card, cursor:"pointer", transition:"all .15s" }}>
+                              <div style={{ width:18, height:18, borderRadius:4, flexShrink:0, border:`2px solid ${sel ? T.red : T.border}`, background: sel ? T.red : T.card, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                                {sel && <span style={{ color:"#fff", fontSize:11, fontWeight:700 }}>✓</span>}
+                              </div>
+                              <div style={{ flex:1, minWidth:0, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <span style={{ fontSize:13, fontWeight:600, color: sel ? T.red : T.text }}>{tag.name}</span>
+                                <span style={{ fontSize:11, color: T.muted }}>{tag.optIn || 0} contacts</span>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Specific Individual Suppression */}
+                  <div style={{ background:T.card, borderRadius:12, border:`1px solid ${T.border}`, padding:"20px" }}>
+                    <div style={{ fontSize:15, fontWeight:700, color:T.text, marginBottom:4 }}>Exclude Specific Contacts</div>
+                    <div style={{ fontSize:12, color:T.subtle, marginBottom:16 }}>Suppress sending to specific individuals in this broadcast.</div>
+                    
+                    {form.exclusionContacts.length > 0 && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 16, padding: 12, background: T.redLight, borderRadius: 10, border: `1px dashed ${T.red}` }}>
+                        {form.exclusionContacts.map(id => {
+                          const contactObj = allContacts.find(c => String(c._id || c.id) === String(id));
+                          const label = contactObj ? (contactObj.name || contactObj.phoneNumber) : id;
+                          return (
+                            <div key={id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', background: '#fff', border: `1px solid ${T.red}`, borderRadius: 20, fontSize: 11, fontWeight: 600, color: T.red }}>
+                              <span>{label}</span>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); toggleExclusionContact(id); }}
+                                style={{ border: 'none', background: 'transparent', color: T.red, fontWeight: 700, cursor: 'pointer', padding: 0, fontSize: 13, width: 14, height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                              >
+                                ×
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 200, overflowY: 'auto' }}>
+                      {allContacts.map(c => {
+                        const id = c._id || c.id;
+                        const sel = form.exclusionContacts.includes(id);
+                        return (
+                          <div key={id} onClick={() => toggleExclusionContact(id)}
+                            style={{ display:"flex", alignItems:"center", gap:12, padding:"10px 14px", borderRadius:10, border:`1.5px solid ${sel ? T.red : T.border}`, background: sel ? T.redLight : T.card, cursor:"pointer", transition:"all .15s" }}>
+                            <div style={{ width:18, height:18, borderRadius:4, flexShrink:0, border:`2px solid ${sel ? T.red : T.border}`, background: sel ? T.red : T.card, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                              {sel && <span style={{ color:"#fff", fontSize:11, fontWeight:700 }}>✓</span>}
+                            </div>
+                            <div style={{ flex:1, minWidth:0, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <span style={{ fontSize:13, fontWeight:600, color: sel ? T.red : T.text }}>{c.name || c.phoneNumber}</span>
+                              <span style={{ fontSize:11, color: T.muted, fontFamily: T.mono }}>{c.phoneNumber}</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Live Estimation Dashboard */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div style={{ background:T.card, borderRadius:12, border:`1px solid ${T.border}`, padding:"20px", position: 'sticky', top: 76 }}>
+                <div style={{ fontSize:14, fontWeight:700, color:T.text, marginBottom:16 }}>
+                  Live audience estimation
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                  <div style={{ background: T.bg, padding: 16, borderRadius: 10, border: `1px solid ${T.border}` }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: T.muted, textTransform: 'uppercase', marginBottom: 4 }}>Total deduped recipients</div>
+                    <div style={{
+                      fontSize: 32,
+                      fontFamily: T.mono,
+                      fontWeight: 700,
+                      color: estimation.totalRecipients > 0 ? T.green : T.subtle,
+                      transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+                      transform: estimating ? 'scale(0.97)' : 'scale(1)',
+                      opacity: estimating ? 0.75 : 1,
+                      display: 'inline-block'
+                    }}>
+                      {estimating ? "Calculating…" : estimation.totalRecipients.toLocaleString()}
+                    </div>
+                    <div style={{ fontSize: 11, color: T.subtle, marginTop: 4 }}>
+                      Opted-in contacts matching filters
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                    <div style={{ border: `1px solid ${T.border}`, borderRadius: 8, padding: 10, background: '#fff' }}>
+                      <div style={{ fontSize: 9, fontWeight: 700, color: T.muted, textTransform: 'uppercase' }}>Duplicates skipped</div>
+                      <div style={{ fontSize: 16, fontFamily: T.mono, fontWeight: 700, color: T.text, marginTop: 2 }}>{estimation.duplicatesRemoved}</div>
+                    </div>
+                    <div style={{ border: `1px solid ${T.border}`, borderRadius: 8, padding: 10, background: '#fff' }}>
+                      <div style={{ fontSize: 9, fontWeight: 700, color: T.muted, textTransform: 'uppercase' }}>Opt-outs skipped</div>
+                      <div style={{ fontSize: 16, fontFamily: T.mono, fontWeight: 700, color: T.amber, marginTop: 2 }}>{estimation.optedOutExcluded}</div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: `1px solid ${T.border}` }}>
+                    <span style={{ fontSize: 12, color: T.muted }}>Broadcast count</span>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: T.text }}>{estimation.totalRecipients} msgs</span>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: `1px solid ${T.border}` }}>
+                    <span style={{ fontSize: 12, color: T.muted }}>Base rate per msg</span>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: T.text }}>₹0.72</span>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: `1px solid ${T.border}` }}>
+                    <span style={{ fontSize: 12, color: T.muted }}>Meta platform fee</span>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: T.text }}>₹0.48</span>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: `1px solid ${T.border}` }}>
+                    <span style={{ fontSize: 12, color: T.muted }}>Total est. charges</span>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: T.greenDark }}>
+                      ₹{(estimation.totalRecipients * 1.20).toFixed(2)}
+                    </span>
+                  </div>
+
+                  {estimationError && (
+                    <div style={{ background: T.redLight, border: `1px solid ${T.red}`, padding: 12, borderRadius: 8, fontSize: 11, color: T.red, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      <div style={{ fontWeight: 700 }}>⚠️ Live estimation failed</div>
+                      <div>Check your network status or retry calculation.</div>
+                      <button onClick={() => setRetryCount(r => r + 1)} style={{ padding: '6px 12px', background: T.red, color: '#fff', border: 'none', borderRadius: 6, fontSize: 10, fontWeight: 700, cursor: 'pointer', alignSelf: 'flex-start', transition: 'all 0.15s' }}>
+                        Retry Calculation
+                      </button>
+                    </div>
+                  )}
+
+                  {estimation.totalRecipients === 0 && !estimating && !estimationError && (
+                    <div style={{
+                      background: '#fff',
+                      border: `1.5px dashed ${T.border}`,
+                      padding: '20px 14px',
+                      borderRadius: 10,
+                      textAlign: 'center',
+                      color: T.subtle
+                    }}>
+                      <div style={{ fontSize: 24, marginBottom: 8 }}>👥</div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: T.text, marginBottom: 4 }}>No Audience Selected</div>
+                      <div style={{ fontSize: 11, color: T.muted }}>
+                        Select a target group, list, tag, or manual contacts to calculate your live broadcast audience.
+                      </div>
+                    </div>
+                  )}
+
+                  {estimation.totalRecipients > 0 && estimation.duplicatesRemoved > (estimation.totalRecipients * 0.3) && (
+                    <div style={{ background: T.amberLight, border: `1px solid ${T.amber}`, padding: 10, borderRadius: 8, fontSize: 11, color: T.amber }}>
+                      ℹ️ High overlap warning: {estimation.duplicatesRemoved} contacts are in multiple selected tags/groups. Skipping duplicates safely.
+                    </div>
+                  )}
+
+                  {isAgent && estimation.totalRecipients > 100 && (
+                    <div style={{ background: T.redLight, border: `1px solid ${T.red}`, padding: 10, borderRadius: 8, fontSize: 11, color: T.red }}>
+                      ⚠️ <strong>Role Limit Restrict:</strong> Agents are restricted from launching campaigns to more than 100 contacts. Total targeted contacts: {estimation.totalRecipients.toLocaleString()}. Please reduce targeted selections or contact an administrator to approve higher volume blasts.
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
-            {/* Summary + send rate */}
-            {(form.contactLists.length > 0 || form.targetGroups.length > 0 || form.targetTags.length > 0 || form.selectAll) && (
-              <div style={{ background:T.card, borderRadius:12, border:`1px solid ${T.border}`,
-                padding:"20px" }}>
-                <div style={{ display:"flex", justifyContent:"space-between",
-                  alignItems:"center", marginBottom:16 }}>
-                  <div>
-                    <div style={{ fontSize:14, fontWeight:700, color:T.text }}>
-                      Send rate
-                    </div>
-                    <div style={{ fontSize:11, color:T.subtle }}>
-                      WhatsApp limits prevent sending too fast
-                    </div>
-                  </div>
-                  <div style={{ textAlign:"right" }}>
-                    <div style={{ fontFamily:T.mono, fontSize:22, fontWeight:700,
-                      color:T.green }}>{form.sendRate}</div>
-                    <div style={{ fontSize:10, color:T.subtle }}>msgs / min</div>
-                  </div>
-                </div>
-
-                <input type="range" min="1" max="60" value={form.sendRate}
-                  onChange={e => setForm(f => ({ ...f, sendRate: Number(e.target.value) }))}
-                  aria-label="Send rate messages per minute"
-                  style={{ width:"100%", accentColor:T.green, marginBottom:10 }} />
-
-                <div style={{ display:"flex", justifyContent:"space-between",
-                  fontSize:10, color:T.subtle }}>
-                  <span>1 msg/min (safe)</span>
-                  <span>60 msg/min (max)</span>
-                </div>
-
-                <div style={{ marginTop:16, padding:"12px 14px", background:T.bg,
-                  borderRadius:9, border:`1px solid ${T.border}` }}>
-                  <div style={{ display:"flex", justifyContent:"space-between",
-                    fontSize:12, marginBottom:6 }}>
-                    <span style={{ color:T.muted }}>Total recipients</span>
-                    <span style={{ fontFamily:T.mono, fontWeight:700, color:T.text }}>
-                      {typeof totalContacts === 'number' ? totalContacts.toLocaleString() : totalContacts}
-                    </span>
-                  </div>
-                  <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, marginBottom:6 }}>
-                    <span style={{ color:T.muted }}>Estimated time</span>
-                    <span style={{ fontFamily:T.mono, fontWeight:700, color:T.text }}>
-                      {typeof totalContacts === 'number' ? `~${Math.ceil(totalContacts / form.sendRate)} min` : "Depends on audience size"}
-                    </span>
-                  </div>
-                  <div style={{ display:"flex", justifyContent:"space-between", fontSize:12 }}>
-                    <span style={{ color:T.muted }}>Segments selected</span>
-                    <span style={{ fontWeight:600, color:T.text }}>
-                      {form.selectAll ? 'All Contacts' : (form.contactLists.length + form.targetGroups.length + form.targetTags.length)}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            )}
+            {/* Step 2 Footer */}
+            <div style={{ gridColumn: 'span 2', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 8, paddingBottom: 40 }}>
+              <button onClick={() => setStep(1)} style={{ padding: '12px 24px', borderRadius: 8, background: '#fff', border: `1px solid ${T.border}`, fontSize: 14, fontWeight: 500, color: T.text, cursor: 'pointer' }}>← Back</button>
+              <div style={{ fontSize: 14, color: T.subtle }}>Step 2 of 5</div>
+              <button 
+                onClick={() => setStep(3)} 
+                disabled={!canNext()} 
+                style={{ padding: '12px 24px', borderRadius: 8, background: canNext() ? '#2563EB' : '#E2E8F0', color: canNext() ? '#fff' : '#94A3B8', border: 'none', fontSize: 14, fontWeight: 600, cursor: canNext() ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', gap: 8 }}>
+                Continue <span>→</span>
+              </button>
+            </div>
           </div>
         )}
 
-        {/* ── STEP 3: PERSONALISE ── */}
+        {/* ── STEP 3: PERSONALISATION & MESSAGE PREVIEW ── */}
         {step === 3 && (
-          <div style={{ background:T.card, borderRadius:12, border:`1px solid ${T.border}`,
-            padding:"20px" }}>
-            <div style={{ fontSize:14, fontWeight:700, color:T.text, marginBottom:4 }}>
-              Map template variables
-            </div>
-            <div style={{ fontSize:11, color:T.subtle, marginBottom:18 }}>
-              Match each variable in <strong>{selectedTemplate?.name}</strong> to a contact
-              field — or enter a fixed value
-            </div>
-
-            {(!selectedTemplate || (selectedTemplate?.variables || []).length === 0) && (
-              <div style={{ padding:"24px", textAlign:"center", color:T.subtle, fontSize:13 }}>
-                This template has no variables — no mapping needed ✓
+          <div style={{ display:"grid", gridTemplateColumns: '4fr 3fr', gap: 24, maxWidth: 1000, margin: '0 auto' }}>
+            
+            {/* Variable Mapping Inputs */}
+            <div style={{ background:T.card, borderRadius:12, border:`1px solid ${T.border}`, padding:"24px" }}>
+              <div style={{ fontSize:15, fontWeight:700, color:T.text, marginBottom:4 }}>
+                Map template variables
               </div>
-            )}
-
-            {(selectedTemplate?.variables || []).map((v, i) => (
-              <div key={v} style={{ display:"flex", alignItems:"center", gap:12,
-                padding:"12px 14px", background:T.bg, borderRadius:9,
-                border:`1px solid ${T.border}`, marginBottom:8 }}>
-                <span style={{ padding:"3px 9px", borderRadius:20, fontSize:11,
-                  fontFamily:T.mono, background:T.purpleLight, color:T.purple,
-                  border:`1px solid #C4B5FD`, flexShrink:0 }}>
-                  {`{{${i+1}}}`}
-                </span>
-                <div style={{ fontSize:11, color:T.subtle, flexShrink:0 }}>maps to</div>
-                <select value={form.varMap[v] || ""}
-                  onChange={e => setForm(f => ({ ...f, varMap: { ...f.varMap, [v]: e.target.value } }))}
-                  style={{ flex:1, padding:"7px 10px", borderRadius:7,
-                    border:`1px solid ${T.border}`, fontSize:12, color:T.text,
-                    background:T.card, fontFamily:T.font, outline:"none", cursor:"pointer" }}>
-                  <option value="">— Select a field —</option>
-                  <optgroup label="Contact fields">
-                    {(contactFields || CONTACT_FIELDS).map(f => (
-                      <option key={f} value={f}>{f}</option>
-                    ))}
-                  </optgroup>
-                </select>
-                <div style={{ fontSize:11, color:T.subtle, flexShrink:0 }}>or</div>
-                <input
-                  placeholder="Fixed text"
-                  value={typeof form.varMap[v] === "string" && !CONTACT_FIELDS.includes(form.varMap[v])
-                    ? form.varMap[v] : ""}
-                  onChange={e => setForm(f => ({ ...f, varMap: { ...f.varMap, [v]: e.target.value } }))}
-                  style={{ width:120, padding:"7px 10px", borderRadius:7,
-                    border:`1px solid ${T.border}`, fontSize:12, color:T.text,
-                    fontFamily:T.font, outline:"none", flexShrink:0 }} />
+              <div style={{ fontSize:12, color:T.subtle, marginBottom:20 }}>
+                Map each placeholder variable in <strong>{selectedTemplate?.name}</strong> to contact fields.
               </div>
-            ))}
 
-            <div style={{ marginTop:16, padding:"12px 14px", background:T.greenLight,
-              borderRadius:9, border:`1px solid #6EE7B7`, fontSize:12, color:T.greenDark }}>
-              💡 Variables left unmapped will show the placeholder (e.g. <code>{"{{1}}"}</code>)
-              in the message. Map all variables for best results.
+              {(!selectedTemplate || (selectedTemplate?.variables || []).length === 0) && (
+                <div style={{ padding:"24px", textAlign:"center", color:T.subtle, fontSize:13 }}>
+                  This template has no variables — no mapping needed ✓
+                </div>
+              )}
+
+              {(selectedTemplate?.variables || []).map((v, i) => (
+                <div key={v} style={{ display:"flex", flexDirection: 'column', gap: 8, padding:"16px", background:T.bg, borderRadius:10, border:`1px solid ${T.border}`, marginBottom:12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ padding:"3px 9px", borderRadius:20, fontSize:11, fontFamily:T.mono, background:T.purpleLight, color:T.purple, border:`1px solid #C4B5FD` }}>
+                      {`{{${i+1}}}`}
+                    </span>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: T.text }}>Variable Mapping</span>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 6 }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 10, color: T.muted, marginBottom: 4 }}>Map to dynamic field</label>
+                      <select value={form.varMap[v] || ""}
+                        onChange={e => setForm(f => ({ ...f, varMap: { ...f.varMap, [v]: e.target.value } }))}
+                        style={{ width: '100%', padding:"8px 10px", borderRadius:7, border:`1px solid ${T.border}`, fontSize:12, color:T.text, background:T.card, fontFamily:T.font, outline:"none", cursor:"pointer" }}>
+                        <option value="">— Select dynamic field —</option>
+                        <optgroup label="Contact attributes">
+                          {(contactFields || CONTACT_FIELDS).map(f => (
+                            <option key={f} value={f}>{f}</option>
+                          ))}
+                        </optgroup>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label style={{ display: 'block', fontSize: 10, color: T.muted, marginBottom: 4 }}>Or use a fallback / fixed text</label>
+                      <input
+                        placeholder="e.g. VIP Customer"
+                        value={typeof form.varMap[v] === "string" && !CONTACT_FIELDS.includes(form.varMap[v]) ? form.varMap[v] : ""}
+                        onChange={e => setForm(f => ({ ...f, varMap: { ...f.varMap, [v]: e.target.value } }))}
+                        style={{ width: '100%', padding:"8px 10px", borderRadius:7, border:`1px solid ${T.border}`, fontSize:12, color:T.text, fontFamily:T.font, outline:"none" }} />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Real-time WhatsApp Device Preview Mockup */}
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+              <div style={{ width: 280, height: 500, background: '#0B141A', border: '8px solid #334155', borderRadius: 32, padding: 12, boxSizing: 'border-box', boxShadow: '0 20px 40px rgba(0,0,0,0.15)', display: 'flex', flexDirection: 'column', position: 'sticky', top: 76 }}>
+                
+                {/* Phone Header Mockup */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingBottom: 8, borderBottom: '1px solid #1F2C34', marginBottom: 12 }}>
+                  <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#fff' }} />
+                  <div style={{ width: 28, height: 28, borderRadius: '50%', background: T.green, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 10, fontWeight: 700 }}>WA</div>
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: '#E9EDEF' }}>WhatsApp Support</div>
+                    <div style={{ fontSize: 8, color: '#8696A0' }}>Online</div>
+                  </div>
+                </div>
+
+                {/* Message Bubble Container */}
+                <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', justifyContent: 'flex-start' }}>
+                  <div style={{ alignSelf: 'flex-start', background: '#202C33', borderRadius: 8, padding: 8, borderTopLeftRadius: 0, maxWidth: '90%', marginBottom: 10, border: '1px solid #2F3B43' }}>
+                    
+                    {/* Media Header Preview */}
+                    {getHeaderComponent() && (
+                      <div style={{ background: '#111B21', borderRadius: 6, padding: '16px 8px', marginBottom: 6, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', border: '1px dashed #4F5E68' }}>
+                        <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="#8696A0" strokeWidth="2">
+                          <rect x="3" y="3" width="18" height="18" rx="2"/>
+                          <circle cx="8.5" cy="8.5" r="1.5"/>
+                          <polyline points="21 15 16 10 5 21"/>
+                        </svg>
+                        <span style={{ fontSize: 8, color: '#8696A0', marginTop: 4, fontWeight: 600 }}>Header Image / Video Placeholder</span>
+                      </div>
+                    )}
+
+                    {/* Header text if any */}
+                    {getHeaderComponent() && getHeaderComponent().text && (
+                      <div style={{ fontSize: 11, fontWeight: 700, color: '#E9EDEF', marginBottom: 4 }}>
+                        {getHeaderComponent().text}
+                      </div>
+                    )}
+
+                    {/* Body text with live replaced variables */}
+                    <div style={{ fontSize: 11, color: '#E9EDEF', whiteSpace: 'pre-wrap', lineHeight: 1.4 }}>
+                      {renderMessageBody()}
+                    </div>
+
+                    {/* Footer component */}
+                    {getFooterComponent() && getFooterComponent().text && (
+                      <div style={{ fontSize: 8.5, color: '#8696A0', marginTop: 5 }}>
+                        {getFooterComponent().text}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Buttons Mockup */}
+                  {getButtonsComponent() && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxWidth: '90%' }}>
+                      {(getButtonsComponent().buttons || []).map((btn, idx) => (
+                        <div key={idx} style={{ background: '#202C33', border: '1px solid #2F3B43', padding: '6px 12px', borderRadius: 6, fontSize: 10.5, color: T.green, textAlign: 'center', fontWeight: 600 }}>
+                          🔗 {btn.text || "Quick Action"}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Step 3 Footer */}
+            <div style={{ gridColumn: 'span 2', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 8, paddingBottom: 40 }}>
+              <button onClick={() => setStep(2)} style={{ padding: '12px 24px', borderRadius: 8, background: '#fff', border: `1px solid ${T.border}`, fontSize: 14, fontWeight: 500, color: T.text, cursor: 'pointer' }}>← Back</button>
+              <div style={{ fontSize: 14, color: T.subtle }}>Step 3 of 5</div>
+              <button 
+                onClick={() => setStep(4)} 
+                disabled={!canNext()} 
+                style={{ padding: '12px 24px', borderRadius: 8, background: canNext() ? '#2563EB' : '#E2E8F0', color: canNext() ? '#fff' : '#94A3B8', border: 'none', fontSize: 14, fontWeight: 600, cursor: canNext() ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', gap: 8 }}>
+                Continue <span>→</span>
+              </button>
             </div>
           </div>
         )}
 
-        {/* ── STEP 4: REVIEW & SCHEDULE ── */}
+        {/* ── STEP 4: SCHEDULING & THROTTLING ── */}
         {step === 4 && (
-          <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
-            {/* Summary card */}
-            <div style={{ background:T.card, borderRadius:12, border:`1px solid ${T.border}`,
-              overflow:"hidden" }}>
-              <div style={{ padding:"14px 18px", borderBottom:`1px solid ${T.border}`,
-                background:T.bg }}>
-                <div style={{ fontSize:13, fontWeight:700, color:T.text }}>Campaign summary</div>
+          <div style={{ display:"flex", flexDirection:"column", gap:16, maxWidth: 700, margin: '0 auto' }}>
+            <div style={{ background:T.card, borderRadius:12, border:`1px solid ${T.border}`, padding:"24px" }}>
+              <div style={{ fontSize:15, fontWeight:700, color:T.text, marginBottom:16 }}>
+                Launch scheduling
               </div>
-              <div style={{ padding:"16px 18px" }}>
+              
+              <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom: 20 }}>
                 {[
-                  ["Campaign name", form.name],
-                  ["Template",      selectedTemplate?.name || "—"],
-                  ["Category",      selectedTemplate?.category || "—"],
-                  ["Lists",         `${form.contactLists.length} list${form.contactLists.length!==1?"s":""}` ],
-                  ["Recipients",    `${totalContacts.toLocaleString()} opted-in contacts`],
-                  ["Send rate",     `${form.sendRate} messages / minute`],
-                  ["Est. duration", `~${Math.ceil(totalContacts/form.sendRate)} minutes`],
-                ].map(([label, val]) => (
-                  <div key={label} style={{ display:"flex", justifyContent:"space-between",
-                    padding:"7px 0", borderBottom:`1px solid ${T.border}` }}>
-                    <span style={{ fontSize:12, color:T.muted }}>{label}</span>
-                    <span style={{ fontSize:12, fontWeight:600, color:T.text }}>{val}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Schedule toggle */}
-            <div style={{ background:T.card, borderRadius:12, border:`1px solid ${T.border}`,
-              padding:"18px" }}>
-              <div style={{ fontSize:13, fontWeight:700, color:T.text, marginBottom:14 }}>
-                When to send?
-              </div>
-              <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-                {[
-                  { key:true,  label:"Send now",         sub:"Start sending immediately after launch" },
-                  { key:false, label:"Schedule for later", sub:"Pick a specific date and time"        },
+                  { key:true,  label:"Send now",         sub:"Launch campaign and start dispatching immediately" },
+                  { key:false, label:"Schedule for later", sub:"Orchestrate campaign to execute automatically at specific time" },
                 ].map(opt => (
                   <div key={String(opt.key)}
                     onClick={() => setForm(f => ({ ...f, scheduleNow: opt.key }))}
@@ -1127,13 +1776,12 @@ function CampaignWizard({ onBack, onLaunch }) {
                       borderRadius:10, border:`2px solid ${form.scheduleNow===opt.key ? T.green : T.border}`,
                       background: form.scheduleNow===opt.key ? T.greenLight : T.card,
                       cursor:"pointer", transition:"all .15s" }}>
-                    <div style={{ width:20, height:20, borderRadius:"50%", flexShrink:0,
+                    <div style={{ width:18, height:18, borderRadius:"50%", flexShrink:0,
                       border:`2px solid ${form.scheduleNow===opt.key ? T.green : T.border}`,
                       background: form.scheduleNow===opt.key ? T.green : T.card,
                       display:"flex", alignItems:"center", justifyContent:"center" }}>
                       {form.scheduleNow === opt.key && (
-                        <div style={{ width:8, height:8, borderRadius:"50%",
-                          background:"#fff" }} />
+                        <div style={{ width:8, height:8, borderRadius:"50%", background:"#fff" }} />
                       )}
                     </div>
                     <div>
@@ -1148,92 +1796,174 @@ function CampaignWizard({ onBack, onLaunch }) {
               </div>
 
               {!form.scheduleNow && (
-                <div style={{ display:"flex", gap:10, marginTop:14 }}>
-                  <div style={{ flex:1 }}>
-                    <label style={{ display:"block", fontSize:11, fontWeight:600,
-                      color:T.muted, marginBottom:4 }}>Date</label>
-                    <input type="date" value={form.scheduleDate}
-                      onChange={e => setForm(f => ({ ...f, scheduleDate: e.target.value }))}
-                      style={{ width:"100%", padding:"8px 11px", borderRadius:8,
-                        border:`1px solid ${T.border}`, fontSize:12, fontFamily:T.font,
-                        outline:"none" }} />
+                <div style={{ display:"flex", flexDirection: 'column', gap: 14, background: T.bg, padding: 16, borderRadius: 10, border: `1px solid ${T.border}` }}>
+                  <div style={{ display:"flex", gap:12 }}>
+                    <div style={{ flex:1 }}>
+                      <label style={{ display:"block", fontSize:11, fontWeight:600, color:T.muted, marginBottom:4 }}>Send Date</label>
+                      <input type="date" value={form.scheduleDate}
+                        onChange={e => setForm(f => ({ ...f, scheduleDate: e.target.value }))}
+                        style={{ width:"100%", padding:"8px 11px", borderRadius:8,
+                          border:`1px solid ${T.border}`, fontSize:13, fontFamily:T.font,
+                          outline:"none" }} />
+                    </div>
+                    <div style={{ flex:1 }}>
+                      <label style={{ display:"block", fontSize:11, fontWeight:600, color:T.muted, marginBottom:4 }}>Send Time</label>
+                      <input type="time" value={form.scheduleTime}
+                        onChange={e => setForm(f => ({ ...f, scheduleTime: e.target.value }))}
+                        style={{ width:"100%", padding:"8px 11px", borderRadius:8,
+                          border:`1px solid ${T.border}`, fontSize:13, fontFamily:T.font,
+                          outline:"none" }} />
+                    </div>
                   </div>
-                  <div style={{ flex:1 }}>
-                    <label style={{ display:"block", fontSize:11, fontWeight:600,
-                      color:T.muted, marginBottom:4 }}>Time</label>
-                    <input type="time" value={form.scheduleTime}
-                      onChange={e => setForm(f => ({ ...f, scheduleTime: e.target.value }))}
+
+                  <div>
+                    <label style={{ display:"block", fontSize:11, fontWeight:600, color:T.muted, marginBottom:4 }}>Target Timezone</label>
+                    <select value={form.timezone}
+                      onChange={e => setForm(f => ({ ...f, timezone: e.target.value }))}
                       style={{ width:"100%", padding:"8px 11px", borderRadius:8,
-                        border:`1px solid ${T.border}`, fontSize:12, fontFamily:T.font,
-                        outline:"none" }} />
+                        border:`1px solid ${T.border}`, fontSize:13, fontFamily:T.font,
+                        outline:"none", cursor:"pointer", background: '#fff' }}>
+                      {TIMEZONES.map(tz => (
+                        <option key={tz} value={tz}>{tz}</option>
+                      ))}
+                    </select>
                   </div>
                 </div>
               )}
             </div>
 
-            {/* Warning */}
-            <div style={{ padding:"12px 14px", background:"#FFFBEB", borderRadius:9,
-              border:`1px solid #FCD34D`, fontSize:12, color:T.amber, lineHeight:1.6 }}>
-              ⚠️ Once launched, messages start sending immediately. Ensure your contact list
-              is correct and all variables are properly mapped before launching.
+            {/* Smart Rate Limiting & Throttling */}
+            <div style={{ background:T.card, borderRadius:12, border:`1px solid ${T.border}`, padding:"24px" }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+                <div>
+                  <div style={{ fontSize:15, fontWeight:700, color:T.text }}>
+                    Send throttling / Rate limits
+                  </div>
+                  <div style={{ fontSize:11, color:T.subtle }}>
+                    Prevent spam triggers by pacing WhatsApp message dispatch rates.
+                  </div>
+                </div>
+                <div style={{ textAlign:"right" }}>
+                  <div style={{ fontFamily:T.mono, fontSize:22, fontWeight:700, color:T.green }}>{form.sendRate}</div>
+                  <div style={{ fontSize:10, color:T.subtle }}>messages / min</div>
+                </div>
+              </div>
+
+              <input type="range" min="1" max="60" value={form.sendRate}
+                onChange={e => setForm(f => ({ ...f, sendRate: Number(e.target.value) }))}
+                style={{ width:"100%", accentColor:T.green, marginBottom:10 }} />
+
+              <div style={{ display:"flex", justifyContent:"space-between", fontSize:10, color:T.subtle }}>
+                <span>1 message/min (sparks no spam warnings)</span>
+                <span>60 messages/min (maximum limit)</span>
+              </div>
+            </div>
+
+            {/* Step 4 Footer */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 8, paddingBottom: 40 }}>
+              <button onClick={() => setStep(3)} style={{ padding: '12px 24px', borderRadius: 8, background: '#fff', border: `1px solid ${T.border}`, fontSize: 14, fontWeight: 500, color: T.text, cursor: 'pointer' }}>← Back</button>
+              <div style={{ fontSize: 14, color: T.subtle }}>Step 4 of 5</div>
+              <button 
+                onClick={() => setStep(5)} 
+                disabled={!canNext()} 
+                style={{ padding: '12px 24px', borderRadius: 8, background: canNext() ? '#2563EB' : '#E2E8F0', color: canNext() ? '#fff' : '#94A3B8', border: 'none', fontSize: 14, fontWeight: 600, cursor: canNext() ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', gap: 8 }}>
+                Continue <span>→</span>
+              </button>
             </div>
           </div>
         )}
 
-        {/* WIZARD NAVIGATION */}
-        <div style={{ display:"flex", justifyContent:"space-between",
-          alignItems:"center", marginTop:22 }}>
-          <button onClick={() => step > 1 ? setStep(s => s-1) : onBack()}
-            style={{ display:"flex", alignItems:"center", gap:6, padding:"9px 16px",
-              borderRadius:8, border:`1px solid ${T.border}`, background:T.card,
-              fontSize:13, color:T.text, cursor:"pointer" }}>
-            ← {step > 1 ? "Back" : "Cancel"}
-          </button>
+        {/* ── STEP 5: REVIEW & LAUNCH ── */}
+        {step === 5 && (
+          <div style={{ display:"flex", flexDirection:"column", gap:16, maxWidth: 700, margin: '0 auto' }}>
+            
+            {/* Audit Checklist Card */}
+            <div style={{ background:T.card, borderRadius:12, border:`1px solid ${T.border}`, padding:"24px" }}>
+              <div style={{ fontSize:15, fontWeight:700, color:T.text, marginBottom:16 }}>
+                Pre-launch validation checklist
+              </div>
 
-          <div style={{ fontSize:11, color:T.subtle }}>Step {step} of 4</div>
-
-          {step < 4 ? (
-            <button onClick={() => setStep(s => s+1)} disabled={!canNext()}
-              style={{ display:"flex", alignItems:"center", gap:6, padding:"9px 18px",
-                borderRadius:8, border:"none",
-                background: canNext() ? T.green : T.border,
-                color: canNext() ? "#fff" : T.subtle,
-                fontSize:13, fontWeight:600,
-                cursor: canNext() ? "pointer" : "not-allowed" }}>
-              Continue →
-            </button>
-          ) : (
-            <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:8 }}>
-              {launchError && (
-                <div style={{ color:T.red, marginBottom:4 }}>{launchError}</div>
-              )}
-              <button onClick={handleLaunch} disabled={launching}
-              style={{ display:"flex", alignItems:"center", gap:7, padding:"9px 20px",
-                borderRadius:8, border:"none", background: launching ? T.border : T.green,
-                color:"#fff", fontSize:13, fontWeight:700, cursor: launching?"wait":"pointer" }}>
-              {launching ? (
-                <>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-                    stroke="currentColor" strokeWidth="2.5"
-                    style={{ animation:"spin .8s linear infinite" }}>
-                    <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
-                  </svg>
-                  Launching…
-                </>
-              ) : (
-                <>
-                  <svg width="14" height="14" fill="none" viewBox="0 0 24 24"
-                    stroke="currentColor" strokeWidth="2">
-                    <line x1="22" y1="2" x2="11" y2="13"/>
-                    <polygon points="22 2 15 22 11 13 2 9 22 2"/>
-                  </svg>
-                  {form.scheduleNow ? "Launch Campaign 🚀" : "Schedule Campaign"}
-                </>
-              )}
-              </button>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {[
+                  { label: "Campaign Name Unique check", status: !nameExists ? "pass" : "fail", desc: "No overlapping campaign names in active space" },
+                  { label: "Audience Target selected", status: (form.targetGroups.length + form.targetTags.length + form.targetContacts.length > 0) ? "pass" : "fail", desc: `${estimation.totalRecipients} unique recipients targeted` },
+                  { label: "Meta Approved Template", status: selectedTemplate ? "pass" : "fail", desc: `Selected: ${selectedTemplate?.name}` },
+                  { label: "Spam Throttling limit set", status: form.sendRate <= 45 ? "pass" : "warning", desc: `Send rate configured to: ${form.sendRate} msgs/min` },
+                ].map(chk => (
+                  <div key={chk.label} style={{ display: 'flex', gap: 12, borderBottom: `1px solid ${T.border}`, paddingBottom: 10 }}>
+                    <span style={{ fontSize: 14 }}>
+                      {chk.status === "pass" ? "✅" : chk.status === "warning" ? "⚠️" : "❌"}
+                    </span>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: T.text }}>{chk.label}</div>
+                      <div style={{ fontSize: 11, color: T.subtle }}>{chk.desc}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
-          )}
-        </div>
+
+            {/* Final Cost Summary Card */}
+            <div style={{ background:T.card, borderRadius:12, border:`1px solid ${T.border}`, overflow:"hidden" }}>
+              <div style={{ padding:"14px 18px", borderBottom:`1px solid ${T.border}`, background:T.bg }}>
+                <div style={{ fontSize:13, fontWeight:700, color:T.text }}>Final broadcast spec summary</div>
+              </div>
+              <div style={{ padding:"16px 18px" }}>
+                {[
+                  ["Campaign name", form.name],
+                  ["Template",      selectedTemplate?.name || "—"],
+                  ["Targeted contacts", `${estimation.totalRecipients.toLocaleString()} unique opted-in`],
+                  ["Excluded contacts", `${estimation.optedOutExcluded.toLocaleString()}`],
+                  ["Send rate",     `${form.sendRate} messages / minute`],
+                  ["Schedule",      form.scheduleNow ? "Send Immediately" : `Scheduled at ${form.scheduleDate} ${form.scheduleTime} (${form.timezone})`],
+                  ["Total estimated cost", `₹${(estimation.totalRecipients * 1.20).toFixed(2)}`],
+                ].map(([label, val]) => (
+                  <div key={label} style={{ display:"flex", justifyContent:"space-between",
+                    padding:"7px 0", borderBottom:`1px solid ${T.border}` }}>
+                    <span style={{ fontSize:12, color:T.muted }}>{label}</span>
+                    <span style={{ fontSize:12, fontWeight:600, color:T.text }}>{val}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Launch actions */}
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8, paddingBottom: 40 }}>
+              {launchError && (
+                <div style={{ color:T.red, fontSize: 13, marginBottom:4 }}>⚠️ {launchError}</div>
+              )}
+              {isAgent && estimation.totalRecipients > 100 && (
+                <div style={{ color:T.red, fontSize: 12, marginBottom:4, fontWeight:600 }}>⚠️ Restricted: Agents cannot launch blasts exceeding 100 contacts.</div>
+              )}
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button onClick={() => setStep(4)} style={{ padding: '12px 24px', borderRadius: 8, background: '#fff', border: `1px solid ${T.border}`, fontSize: 14, fontWeight: 500, color: T.text, cursor: 'pointer' }}>← Back</button>
+                <button onClick={handleLaunch} disabled={launching || estimation.totalRecipients === 0 || (isAgent && estimation.totalRecipients > 100)}
+                  style={{ display:"flex", alignItems:"center", gap:7, padding:"12px 24px",
+                    borderRadius:8, border:"none", background: (launching || estimation.totalRecipients === 0 || (isAgent && estimation.totalRecipients > 100)) ? T.border : T.green,
+                    color:"#fff", fontSize:14, fontWeight:700, cursor: (launching || estimation.totalRecipients === 0 || (isAgent && estimation.totalRecipients > 100)) ? "not-allowed" : "pointer" }}>
+                  {launching ? (
+                    <>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" strokeWidth="2.5"
+                        style={{ animation:"spin .8s linear infinite" }}>
+                        <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+                      </svg>
+                      Launching…
+                    </>
+                  ) : (
+                    <>
+                      <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                        <line x1="22" y1="2" x2="11" y2="13"/>
+                        <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+                      </svg>
+                      {form.scheduleNow ? "Launch Campaign Now 🚀" : "Orchestrate Schedule ⏰"}
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1243,6 +1973,9 @@ function CampaignWizard({ onBack, onLaunch }) {
    SCREEN 3 — CAMPAIGN DETAIL (live stats)
 ───────────────────────────────────────────── */
 function CampaignDetail({ campaign: initialCampaign, onBack }) {
+  const { user } = useAuthStore();
+  const isViewer = user?.role === 'viewer';
+
   const [campaign, setCampaign] = useState({ ...initialCampaign });
   const [msgTab, setMsgTab]     = useState("all");
   const [confirmPause,  setConfirmPause]  = useState(false);
@@ -1294,25 +2027,34 @@ function CampaignDetail({ campaign: initialCampaign, onBack }) {
 
             {isRunning && (
               <button onClick={() => setConfirmPause(true)}
+                disabled={isViewer}
                 style={{ padding:"7px 13px", borderRadius:8,
-                  border:`1px solid ${T.amber}30`, background:T.amberLight,
-                  fontSize:12, color:T.amber, fontWeight:600, cursor:"pointer" }}>
+                  border:`1px solid ${isViewer ? T.border : `${T.amber}30`}`,
+                  background: isViewer ? T.border : T.amberLight,
+                  fontSize:12, color: isViewer ? T.muted : T.amber,
+                  fontWeight:600, cursor: isViewer ? "not-allowed" : "pointer" }}>
                 ⏸ Pause
               </button>
             )}
             {campaign.status === "paused" && (
               <button onClick={() => setCampaign(c => ({ ...c, status:"running" }))}
+                disabled={isViewer}
                 style={{ padding:"7px 13px", borderRadius:8,
-                  border:`1px solid ${T.green}30`, background:T.greenLight,
-                  fontSize:12, color:T.greenDark, fontWeight:600, cursor:"pointer" }}>
+                  border:`1px solid ${isViewer ? T.border : `${T.green}30`}`,
+                  background: isViewer ? T.border : T.greenLight,
+                  fontSize:12, color: isViewer ? T.muted : T.greenDark,
+                  fontWeight:600, cursor: isViewer ? "not-allowed" : "pointer" }}>
                 ▶ Resume
               </button>
             )}
             {(isRunning || campaign.status === "paused") && (
               <button onClick={() => setConfirmCancel(true)}
+                disabled={isViewer}
                 style={{ padding:"7px 13px", borderRadius:8,
-                  border:`1px solid ${T.red}30`, background:T.redLight,
-                  fontSize:12, color:T.red, fontWeight:600, cursor:"pointer" }}>
+                  border:`1px solid ${isViewer ? T.border : `${T.red}30`}`,
+                  background: isViewer ? T.border : T.redLight,
+                  fontSize:12, color: isViewer ? T.muted : T.red,
+                  fontWeight:600, cursor: isViewer ? "not-allowed" : "pointer" }}>
                 Cancel
               </button>
             )}

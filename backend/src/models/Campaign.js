@@ -36,8 +36,13 @@ const CampaignSchema = new Schema(
     contactListIds: [{ type: Schema.Types.ObjectId, ref: 'ContactList' }],
     targetGroups: [{ type: Schema.Types.ObjectId, ref: 'ContactGroup' }],
     targetTags: [{ type: String }],
+    exclusionGroups: [{ type: Schema.Types.ObjectId, ref: 'ContactGroup' }],
+    exclusionTags: [{ type: String }],
+    targetContacts: [{ type: Schema.Types.ObjectId, ref: 'Contact' }],
+    exclusionContacts: [{ type: Schema.Types.ObjectId, ref: 'Contact' }],
     status: { type: String, enum: StatusEnum, default: 'draft' },
     scheduledAt: { type: Date, default: null },
+    timezone: { type: String, default: 'UTC' },
     startedAt: { type: Date, default: null },
     completedAt: { type: Date, default: null },
     settings: { type: SettingsSchema, default: () => ({}) },
@@ -73,6 +78,8 @@ CampaignSchema.pre('validate', function () {
 });
 
 // Indexes
+CampaignSchema.index({ organizationId: 1, name: 1 });
 CampaignSchema.index({ organizationId: 1, status: 1 });
+CampaignSchema.index({ scheduledAt: 1, status: 1 });
 
 module.exports = mongoose.model('Campaign', CampaignSchema);

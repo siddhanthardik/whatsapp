@@ -18,7 +18,7 @@ async function resolveOrgId(user) {
 
 // ─── GET /api/contact-groups ─────────────────────────────────────────────────
 // Returns all groups for the authenticated user's organization, including
-// contactCount for each group via a single aggregation (no N+1 queries).
+// contactCount and optedInCount for each group via a single aggregation (no N+1 queries).
 exports.getContactGroups = async (req, res) => {
   try {
     const user = req.user;
@@ -38,10 +38,20 @@ exports.getContactGroups = async (req, res) => {
     const countMap = {};
     for (const row of countAgg) countMap[String(row._id)] = row.count;
 
+    // Aggregate opted-in counts per group in one query
+    const optedInAgg = await Contact.aggregate([
+      { $match: { organizationId: new mongoose.Types.ObjectId(orgId), optInStatus: 'opted_in', isBlocked: { $ne: true } } },
+      { $unwind: '$groupIds' },
+      { $group: { _id: '$groupIds', count: { $sum: 1 } } },
+    ]);
+    const optedInMap = {};
+    for (const row of optedInAgg) optedInMap[String(row._id)] = row.count;
+
     const rawGroups = await ContactGroup.find({ organizationId: orgId }).sort({ name: 1 }).lean();
     const groups = rawGroups.map(g => ({
       ...g,
       contactCount: countMap[String(g._id)] || 0,
+      optedInCount: optedInMap[String(g._id)] || 0,
     }));
 
     return sendResponse(res, true, { groups }, 'Contact groups retrieved');

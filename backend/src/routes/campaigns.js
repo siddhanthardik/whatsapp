@@ -15,6 +15,12 @@ function handleValidation(req, res, next) {
 // GET /api/campaigns
 router.get('/', verifyToken, requireOrgAccess, campaignController.getCampaigns);
 
+// GET /api/campaigns/check-name
+router.get('/check-name', verifyToken, campaignController.checkCampaignName);
+
+// POST /api/campaigns/estimate-audience
+router.post('/estimate-audience', verifyToken, campaignController.estimateAudience);
+
 // GET /api/campaigns/:id
 router.get('/:id', verifyToken, requireOrgAccess, campaignController.getCampaignById);
 

@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const Campaign = require('../models/Campaign');
 const Template = require('../models/Template');
 const Contact = require('../models/Contact');
@@ -20,6 +21,11 @@ exports.createCampaign = async (req, res) => {
       contactListIds = [],
       targetGroups = [],
       targetTags = [],
+      exclusionGroups = [],
+      exclusionTags = [],
+      targetContacts = [],
+      exclusionContacts = [],
+      timezone = 'UTC',
       sendRate,
       varMap,
       scheduleNow,
@@ -45,12 +51,17 @@ exports.createCampaign = async (req, res) => {
 
     // determine scheduledAt and status
     let scheduledAt = null;
-    const status = scheduleNow ? 'running' : 'scheduled';
-    if (!scheduleNow && scheduleDate && scheduleTime) {
+    let status = 'draft';
+    if (scheduleNow) {
+      status = 'running';
+    } else if (scheduleDate && scheduleTime) {
       // try to construct an ISO datetime
       const iso = `${scheduleDate}T${scheduleTime}`;
       const d = new Date(iso);
-      if (!isNaN(d.getTime())) scheduledAt = d;
+      if (!isNaN(d.getTime())) {
+        scheduledAt = d;
+        status = 'scheduled';
+      }
     }
 
     const campaign = new Campaign({
@@ -60,6 +71,11 @@ exports.createCampaign = async (req, res) => {
       contactListIds: Array.isArray(contactListIds) ? contactListIds.filter(id => mongoose.Types.ObjectId.isValid(id)) : [],
       targetGroups: Array.isArray(targetGroups) ? targetGroups.filter(id => mongoose.Types.ObjectId.isValid(id)) : [],
       targetTags: Array.isArray(targetTags) ? targetTags : [],
+      exclusionGroups: Array.isArray(exclusionGroups) ? exclusionGroups.filter(id => mongoose.Types.ObjectId.isValid(id)) : [],
+      exclusionTags: Array.isArray(exclusionTags) ? exclusionTags : [],
+      targetContacts: Array.isArray(targetContacts) ? targetContacts.filter(id => mongoose.Types.ObjectId.isValid(id)) : [],
+      exclusionContacts: Array.isArray(exclusionContacts) ? exclusionContacts.filter(id => mongoose.Types.ObjectId.isValid(id)) : [],
+      timezone,
       status,
       scheduledAt,
       settings: campaignSettings,
@@ -82,19 +98,38 @@ exports.createCampaign = async (req, res) => {
       const lists = campaign.contactListIds || [];
       const groups = campaign.targetGroups || [];
       const tags = campaign.targetTags || [];
+      const exclGroups = campaign.exclusionGroups || [];
+      const exclTags = campaign.exclusionTags || [];
+      const targetCts = campaign.targetContacts || [];
+      const exclCts = campaign.exclusionContacts || [];
 
-      const contactQuery = { organizationId: campaign.organizationId, optInStatus: 'opted_in' };
+      const contactQuery = { 
+        organizationId: campaign.organizationId, 
+        optInStatus: 'opted_in',
+        isBlocked: { $ne: true }
+      };
       
       const orConditions = [];
       if (lists.length) orConditions.push({ lists: { $in: lists } });
       if (groups.length) orConditions.push({ groupIds: { $in: groups } });
       if (tags.length) orConditions.push({ tags: { $in: tags } });
+      if (targetCts.length) orConditions.push({ _id: { $in: targetCts } });
 
       if (orConditions.length > 0) {
         contactQuery.$or = orConditions;
       } else if (req.body.selectAll !== true && (!contactListIds || !contactListIds.includes('all'))) {
          // If no targets provided AND "select all" is not true, default to no contacts
          return sendResponse(res, true, { campaign }, 'Campaign created (no audience selected)', 201);
+      }
+
+      // Add exclusions
+      const andConditions = [];
+      if (exclGroups.length) andConditions.push({ groupIds: { $nin: exclGroups } });
+      if (exclTags.length) andConditions.push({ tags: { $nin: exclTags } });
+      if (exclCts.length) andConditions.push({ _id: { $nin: exclCts } });
+
+      if (andConditions.length > 0) {
+        contactQuery.$and = andConditions;
       }
 
       const contacts = await Contact.find(contactQuery).lean();
@@ -291,15 +326,36 @@ exports.launchCampaign = async (req, res) => {
     const lists = campaign.contactListIds || [];
     const groups = campaign.targetGroups || [];
     const tags = campaign.targetTags || [];
+    const exclGroups = campaign.exclusionGroups || [];
+    const exclTags = campaign.exclusionTags || [];
+    const targetCts = campaign.targetContacts || [];
+    const exclCts = campaign.exclusionContacts || [];
 
-    const contactQuery = { organizationId: campaign.organizationId, optInStatus: 'opted_in' };
+    const contactQuery = { 
+      organizationId: campaign.organizationId, 
+      optInStatus: 'opted_in',
+      isBlocked: { $ne: true }
+    };
     const orConditions = [];
     if (lists.length) orConditions.push({ lists: { $in: lists } });
     if (groups.length) orConditions.push({ groupIds: { $in: groups } });
     if (tags.length) orConditions.push({ tags: { $in: tags } });
+    if (targetCts.length) orConditions.push({ _id: { $in: targetCts } });
 
     if (orConditions.length > 0) {
       contactQuery.$or = orConditions;
+    } else {
+      return sendResponse(res, false, {}, 'No target audience selected', 400);
+    }
+
+    // Add exclusions
+    const andConditions = [];
+    if (exclGroups.length) andConditions.push({ groupIds: { $nin: exclGroups } });
+    if (exclTags.length) andConditions.push({ tags: { $nin: exclTags } });
+    if (exclCts.length) andConditions.push({ _id: { $nin: exclCts } });
+
+    if (andConditions.length > 0) {
+      contactQuery.$and = andConditions;
     }
 
     const contacts = await Contact.find(contactQuery).lean();
@@ -449,5 +505,192 @@ exports.getCampaignById = async (req, res) => {
   } catch (err) {
     console.error('getCampaignById error:', err);
     return sendResponse(res, false, {}, 'Failed to retrieve campaign', 500);
+  }
+};
+
+// Check campaign name duplicate within organization
+exports.checkCampaignName = async (req, res) => {
+  try {
+    const user = req.user;
+    if (!user) {
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Authentication required' 
+      });
+    }
+
+    const name = (req.query.name || '').trim();
+    if (!name) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Campaign name is required' 
+      });
+    }
+
+    // Escape regex characters to prevent RegExp injection crashes
+    const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    
+    // Case-insensitive exact match query scoped strictly to organizationId
+    const existing = await Campaign.findOne({
+      organizationId: user.organizationId,
+      name: { $regex: new RegExp(`^${escapedName}$`, 'i') }
+    });
+
+    if (existing) {
+      return res.status(200).json({
+        success: true,
+        exists: true, // legacy compatibility
+        data: {
+          exists: true,
+          campaignId: existing._id,
+          status: existing.status
+        }
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      exists: false, // legacy compatibility
+      data: {
+        exists: false
+      }
+    });
+  } catch (err) {
+    console.error('checkCampaignName error:', err);
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Internal Server Error' 
+    });
+  }
+};
+
+// Estimate campaign target audience with exclusions and deduplication
+exports.estimateAudience = async (req, res) => {
+  try {
+    const user = req.user;
+    if (!user) {
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Authentication required' 
+      });
+    }
+
+    // Support both standardized keys and legacy frontend keys
+    const rawGroupIds = req.body.groupIds || req.body.targetGroups || [];
+    const rawTags = req.body.tags || req.body.targetTags || [];
+    const rawManualContactIds = req.body.manualContactIds || req.body.targetContacts || [];
+    const rawExcludedGroupIds = req.body.excludedGroupIds || req.body.exclusionGroups || [];
+    const rawExcludedTags = req.body.excludedTags || req.body.exclusionTags || [];
+
+    const contactListIds = req.body.contactListIds || [];
+    const exclusionContacts = req.body.exclusionContacts || req.body.excludedContactIds || [];
+
+    const orgId = user.organizationId;
+
+    // Convert raw array entries to ObjectIds safely
+    const parseIds = (list) => {
+      if (!Array.isArray(list)) return [];
+      return list.filter(id => mongoose.Types.ObjectId.isValid(id)).map(id => new mongoose.Types.ObjectId(id));
+    };
+
+    const parsedGroups = parseIds(rawGroupIds);
+    const parsedManualContacts = parseIds(rawManualContactIds);
+    const parsedContactListIds = parseIds(contactListIds);
+    const parsedExcludedGroups = parseIds(rawExcludedGroupIds);
+    const parsedExcludedContacts = parseIds(exclusionContacts);
+
+    // 1. Build the unique deduped query (only opted_in, active organization, and not blocked)
+    const query = { 
+      organizationId: new mongoose.Types.ObjectId(orgId), 
+      optInStatus: 'opted_in',
+      isBlocked: { $ne: true }
+    };
+    
+    const orConditions = [];
+    if (parsedContactListIds.length > 0) orConditions.push({ lists: { $in: parsedContactListIds } });
+    if (parsedGroups.length > 0) orConditions.push({ groupIds: { $in: parsedGroups } });
+    if (rawTags.length > 0) orConditions.push({ tags: { $in: rawTags } });
+    if (parsedManualContacts.length > 0) orConditions.push({ _id: { $in: parsedManualContacts } });
+
+    if (orConditions.length > 0) {
+      query.$or = orConditions;
+    } else {
+      return res.status(200).json({
+        success: true,
+        data: {
+          totalRecipients: 0,
+          duplicatesRemoved: 0,
+          optedOutExcluded: 0,
+          estimatedMessageCount: 0,
+          
+          duplicatesSkipped: 0,
+          optOutsSkipped: 0,
+          estimatedMessages: 0,
+          estimatedCostINR: 0
+        }
+      });
+    }
+
+    const andConditions = [];
+    if (parsedExcludedGroups.length > 0) andConditions.push({ groupIds: { $nin: parsedExcludedGroups } });
+    if (rawExcludedTags.length > 0) andConditions.push({ tags: { $nin: rawExcludedTags } });
+    if (parsedExcludedContacts.length > 0) andConditions.push({ _id: { $nin: parsedExcludedContacts } });
+
+    if (andConditions.length > 0) {
+      query.$and = andConditions;
+    }
+
+    // Run count
+    const totalRecipients = await Contact.countDocuments(query);
+
+    // 2. Count opted-out contacts in the same target audience to show "optOutsSkipped"
+    const optedOutQuery = {
+      organizationId: new mongoose.Types.ObjectId(orgId),
+      optInStatus: 'opted_out',
+      $or: orConditions
+    };
+    const optOutsSkipped = await Contact.countDocuments(optedOutQuery);
+
+    // 3. Estimate duplicates removed
+    // We sum up the individual raw matches and subtract the deduped unique count
+    let rawSum = 0;
+    if (parsedGroups.length > 0) {
+      rawSum += await Contact.countDocuments({ organizationId: orgId, groupIds: { $in: parsedGroups } });
+    }
+    if (parsedContactListIds.length > 0) {
+      rawSum += await Contact.countDocuments({ organizationId: orgId, lists: { $in: parsedContactListIds } });
+    }
+    if (rawTags.length > 0) {
+      rawSum += await Contact.countDocuments({ organizationId: orgId, tags: { $in: rawTags } });
+    }
+    if (parsedManualContacts.length > 0) {
+      rawSum += await Contact.countDocuments({ organizationId: orgId, _id: { $in: parsedManualContacts } });
+    }
+    
+    const duplicatesSkipped = Math.max(0, rawSum - totalRecipients);
+    const estimatedCostINR = Number((totalRecipients * 1.20).toFixed(2));
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        // Frontend compatibility keys
+        totalRecipients,
+        duplicatesRemoved: duplicatesSkipped,
+        optedOutExcluded: optOutsSkipped,
+        estimatedMessageCount: totalRecipients,
+
+        // Standardized format keys
+        duplicatesSkipped,
+        optOutsSkipped,
+        estimatedMessages: totalRecipients,
+        estimatedCostINR
+      }
+    });
+  } catch (err) {
+    console.error('estimateAudience error:', err);
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Internal Server Error' 
+    });
   }
 };

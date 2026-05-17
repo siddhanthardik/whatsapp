@@ -27,7 +27,7 @@ export default function ContactsPage() {
   const [page, setPage] = useState(1)
 
   const { data: contactsResp } = useContacts({ limit: 200 })
-  const contacts = Array.isArray(contactsResp) ? contactsResp : Array.isArray(contactsResp?.items) ? contactsResp.items : []
+  const contacts = Array.isArray(contactsResp) ? contactsResp : Array.isArray(contactsResp?.contacts) ? contactsResp.contacts : Array.isArray(contactsResp?.items) ? contactsResp.items : []
 
   // also include any locally saved contacts (offline fallback)
   let localContacts = []
