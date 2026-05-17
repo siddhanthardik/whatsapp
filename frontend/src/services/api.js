@@ -60,6 +60,7 @@ export const authAPI = {
 
 export const contactGroupsAPI = {
   list: () => api.get('/contact-groups'),
+  checkName: (name) => api.get('/contact-groups/check-name', { params: { name } }),
   create: (data) => api.post('/contact-groups', data),
   update: (id, data) => api.put(`/contact-groups/${id}`, data),
   delete: (id) => api.delete(`/contact-groups/${id}`)

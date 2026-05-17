@@ -17,8 +17,15 @@ const ContactSchema = new Schema(
     email: { type: String, lowercase: true, trim: true },
     customFields: { type: Map, of: String, default: {} },
     tags: [{ type: String, trim: true, lowercase: true }],
+    // Contacts belong to one or more Contact Groups, scoped to the same organization
     groupIds: [{ type: Schema.Types.ObjectId, ref: 'ContactGroup' }],
-    organizationId: { type: Schema.Types.ObjectId, ref: 'Organization', index: true },
+    // Primary tenant key — organizationId is the tenant isolation field
+    organizationId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Organization',
+      required: true,
+      index: true,
+    },
     lists: [{ type: Schema.Types.ObjectId, ref: 'ContactList' }],
     optInStatus: { type: String, enum: optInStatusEnum, default: 'pending' },
     optInSource: { type: String, enum: optInSourceEnum, default: 'manual' },
@@ -32,6 +39,11 @@ const ContactSchema = new Schema(
 
 // Indexes
 ContactSchema.index({ phoneNumber: 1 });
+// Compound unique per organization: same phone cannot appear twice in the same org
 ContactSchema.index({ organizationId: 1, phoneNumber: 1 }, { unique: true, sparse: true });
+// Index for efficient group-based queries
+ContactSchema.index({ groupIds: 1 });
+// Index for efficient tag-based queries
+ContactSchema.index({ tags: 1 });
 
 module.exports = mongoose.model('Contact', ContactSchema);

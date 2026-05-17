@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { body, validationResult } = require('express-validator');
+const { body, query, validationResult } = require('express-validator');
 
 const { verifyToken } = require('../middleware/auth');
 const contactGroupController = require('../controllers/contactGroupController');
@@ -13,16 +13,24 @@ function handleValidation(req, res, next) {
   return next();
 }
 
-// GET all groups
+// ── Real-time name availability check (MUST be before /:id routes) ──────────
+// GET /api/contact-groups/check-name?name=GROUP_NAME
+router.get(
+  '/check-name',
+  verifyToken,
+  [query('name').notEmpty().withMessage('name query param is required')],
+  handleValidation,
+  contactGroupController.checkGroupName
+);
+
+// GET all groups for authenticated org
 router.get('/', verifyToken, contactGroupController.getContactGroups);
 
 // POST create group
 router.post(
   '/',
   verifyToken,
-  [
-    body('name').notEmpty().withMessage('Name is required').trim()
-  ],
+  [body('name').notEmpty().withMessage('Name is required').trim()],
   handleValidation,
   contactGroupController.createContactGroup
 );
@@ -31,9 +39,7 @@ router.post(
 router.put(
   '/:id',
   verifyToken,
-  [
-    body('name').optional().notEmpty().withMessage('Name cannot be empty').trim()
-  ],
+  [body('name').optional().notEmpty().withMessage('Name cannot be empty').trim()],
   handleValidation,
   contactGroupController.updateContactGroup
 );

@@ -739,6 +739,10 @@ function ImportScreen({ onBack }) {
   const [newGroupDesc, setNewGroupDesc] = useState("");
   const [newGroupColor, setNewGroupColor] = useState("#10B981");
   const [creatingGroup, setCreatingGroup] = useState(false);
+  // Real-time name availability state
+  const [nameCheckStatus, setNameCheckStatus] = useState(null); // null | 'checking' | 'available' | 'taken'
+  const [nameCheckMsg, setNameCheckMsg] = useState("");
+  const nameDebounceRef = useRef(null);
 
   useEffect(() => {
     contactGroupsAPI.list().then(res => {
@@ -754,11 +758,38 @@ function ImportScreen({ onBack }) {
     }
   };
 
+  // Debounced real-time name availability check (400ms)
+  const handleNewGroupNameChange = (e) => {
+    const val = e.target.value;
+    setNewGroupName(val);
+    setNameCheckStatus(null);
+    setNameCheckMsg("");
+    if (nameDebounceRef.current) clearTimeout(nameDebounceRef.current);
+    if (!val.trim()) return;
+    setNameCheckStatus('checking');
+    nameDebounceRef.current = setTimeout(async () => {
+      try {
+        const res = await contactGroupsAPI.checkName(val.trim());
+        if (res?.data?.exists) {
+          setNameCheckStatus('taken');
+          setNameCheckMsg(res.data.message || 'Group already exists in your organization');
+        } else {
+          setNameCheckStatus('available');
+          setNameCheckMsg(res.data.message || 'Group name available');
+        }
+      } catch (_) {
+        setNameCheckStatus(null);
+        setNameCheckMsg("");
+      }
+    }, 400);
+  };
+
   const handleCreateGroup = async () => {
     if (!newGroupName.trim()) return toast.error("Group name is required");
+    if (nameCheckStatus === 'taken') return toast.error("Group name already exists in your organization");
     setCreatingGroup(true);
     try {
-      const res = await contactGroupsAPI.create({ name: newGroupName, description: newGroupDesc, color: newGroupColor });
+      const res = await contactGroupsAPI.create({ name: newGroupName.trim(), description: newGroupDesc, color: newGroupColor });
       if (res?.data?.success) {
         const created = res.data.data.group;
         setGroups(prev => [...prev, created].sort((a,b)=>a.name.localeCompare(b.name)));
@@ -767,9 +798,11 @@ function ImportScreen({ onBack }) {
         setNewGroupName("");
         setNewGroupDesc("");
         setNewGroupColor("#10B981");
+        setNameCheckStatus(null);
+        setNameCheckMsg("");
         toast.success("Group created successfully");
       } else {
-        toast.error("Failed to create group");
+        toast.error(res?.data?.message || "Failed to create group");
       }
     } catch (err) {
       toast.error(err.response?.data?.message || "Error creating group");
@@ -1069,16 +1102,28 @@ function ImportScreen({ onBack }) {
             {/* CREATE GROUP MODAL */}
             {showCreateGroup && (
               <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:999, display:"flex", alignItems:"center", justifyContent:"center" }}>
-                <div style={{ background:T.card, width:400, borderRadius:16, boxShadow:"0 20px 40px rgba(0,0,0,0.2)", overflow:"hidden", animation:"slideUp 0.3s ease" }}>
+                <div style={{ background:T.card, width:420, borderRadius:16, boxShadow:"0 20px 40px rgba(0,0,0,0.2)", overflow:"hidden", animation:"slideUp 0.3s ease" }}>
                   <div style={{ padding:"16px 24px", borderBottom:`1px solid ${T.border}`, display:"flex", alignItems:"center", justifyContent:"space-between" }}>
                     <h3 style={{ margin:0, fontSize:16, fontWeight:700, color:T.text }}>Create New Group</h3>
-                    <button onClick={()=>{ setShowCreateGroup(false); setSelectedGroupId(""); }} style={{ border:"none", background:"transparent", cursor:"pointer", color:T.muted, fontSize:20 }}>&times;</button>
+                    <button onClick={()=>{ setShowCreateGroup(false); setSelectedGroupId(""); setNameCheckStatus(null); setNameCheckMsg(""); }} style={{ border:"none", background:"transparent", cursor:"pointer", color:T.muted, fontSize:20 }}>&times;</button>
                   </div>
                   <div style={{ padding:"24px", display:"flex", flexDirection:"column", gap:16 }}>
                     <div>
                       <label style={{ display:"block", fontSize:12, color:T.muted, marginBottom:6, fontWeight:600 }}>Group Name *</label>
-                      <input type="text" value={newGroupName} onChange={e=>setNewGroupName(e.target.value)} placeholder="e.g. VIP Clients"
-                        style={{ width:"100%", padding:"10px 12px", borderRadius:8, border:`1px solid ${T.border}`, fontSize:13, outline:"none", boxSizing:"border-box" }} autoFocus />
+                      <input type="text" value={newGroupName} onChange={handleNewGroupNameChange} placeholder="e.g. VIP Clients"
+                        style={{ width:"100%", padding:"10px 12px", borderRadius:8,
+                          border:`1px solid ${nameCheckStatus === 'taken' ? T.red : nameCheckStatus === 'available' ? T.green : T.border}`,
+                          fontSize:13, outline:"none", boxSizing:"border-box", transition:"border-color 0.2s" }} autoFocus />
+                      {/* Real-time availability feedback */}
+                      {nameCheckStatus === 'checking' && (
+                        <div style={{ fontSize:11, color:T.muted, marginTop:4 }}>Checking availability…</div>
+                      )}
+                      {nameCheckStatus === 'available' && (
+                        <div style={{ fontSize:11, color:T.green, marginTop:4, fontWeight:600 }}>✓ {nameCheckMsg}</div>
+                      )}
+                      {nameCheckStatus === 'taken' && (
+                        <div style={{ fontSize:11, color:T.red, marginTop:4, fontWeight:600 }}>✕ {nameCheckMsg}</div>
+                      )}
                     </div>
                     <div>
                       <label style={{ display:"block", fontSize:12, color:T.muted, marginBottom:6, fontWeight:600 }}>Description (Optional)</label>
@@ -1095,9 +1140,13 @@ function ImportScreen({ onBack }) {
                     </div>
                   </div>
                   <div style={{ padding:"16px 24px", borderTop:`1px solid ${T.border}`, background:T.bg, display:"flex", justifyContent:"flex-end", gap:12 }}>
-                    <button onClick={()=>{ setShowCreateGroup(false); setSelectedGroupId(""); }} style={{ padding:"8px 16px", borderRadius:8, border:`1px solid ${T.border}`, background:T.card, fontSize:13, color:T.text, cursor:"pointer" }}>Cancel</button>
-                    <button onClick={handleCreateGroup} disabled={creatingGroup} style={{ padding:"8px 16px", borderRadius:8, border:"none", background:T.blue, color:"#fff", fontSize:13, fontWeight:600, cursor:creatingGroup?"not-allowed":"pointer" }}>
-                      {creatingGroup ? "Creating..." : "Create Group"}
+                    <button onClick={()=>{ setShowCreateGroup(false); setSelectedGroupId(""); setNameCheckStatus(null); setNameCheckMsg(""); }} style={{ padding:"8px 16px", borderRadius:8, border:`1px solid ${T.border}`, background:T.card, fontSize:13, color:T.text, cursor:"pointer" }}>Cancel</button>
+                    <button onClick={handleCreateGroup} disabled={creatingGroup || nameCheckStatus === 'taken' || nameCheckStatus === 'checking'}
+                      style={{ padding:"8px 16px", borderRadius:8, border:"none",
+                        background: (creatingGroup || nameCheckStatus === 'taken' || nameCheckStatus === 'checking') ? T.muted : T.blue,
+                        color:"#fff", fontSize:13, fontWeight:600,
+                        cursor:(creatingGroup || nameCheckStatus === 'taken' || nameCheckStatus === 'checking') ? "not-allowed" : "pointer" }}>
+                      {creatingGroup ? "Creating…" : "Create Group"}
                     </button>
                   </div>
                 </div>

@@ -1,4 +1,5 @@
 const { parse } = require('csv-parse/sync');
+const mongoose = require('mongoose');
 const Contact = require('../models/Contact');
 const User = require('../models/User');
 
@@ -50,16 +51,17 @@ exports.importContacts = async (req, res) => {
     try {
       if (req.body && req.body.mapping) {
         clientMapping = typeof req.body.mapping === 'string' ? JSON.parse(req.body.mapping) : req.body.mapping;
-        console.log('[importContacts] Received mapping:', clientMapping);
       }
       if (req.body && req.body.groupIds) {
         const rawGroups = typeof req.body.groupIds === 'string' ? JSON.parse(req.body.groupIds) : req.body.groupIds;
-        reqGroups = Array.isArray(rawGroups) 
+        // Always cast to ObjectId — NEVER trust frontend; validate each id
+        reqGroups = Array.isArray(rawGroups)
           ? rawGroups.filter(id => mongoose.Types.ObjectId.isValid(id)).map(id => new mongoose.Types.ObjectId(id))
           : [];
       }
       if (req.body && req.body.tags) {
         reqTags = typeof req.body.tags === 'string' ? JSON.parse(req.body.tags) : req.body.tags;
+        reqTags = Array.isArray(reqTags) ? reqTags.map(t => String(t).trim().toLowerCase()).filter(Boolean) : [];
       }
     } catch (e) {
       console.error('[importContacts] Error parsing req.body JSON fields:', e);
