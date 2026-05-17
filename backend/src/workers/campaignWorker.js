@@ -3,6 +3,8 @@ const axios = require('axios');
 const Campaign = require('../models/Campaign');
 const Template = require('../models/Template');
 const Contact = require('../models/Contact');
+const Message = require('../models/Message');
+const logger = require('../utils/logger');
 
 // REDIS_URL handled by createQueue
 const WABA_TOKEN = process.env.WABA_TOKEN;
@@ -56,24 +58,94 @@ queue.process(async (job, done) => {
 
       try {
         const resp = await axios.post(url, payload, { headers });
+        const wamid = resp.data.messages?.[0]?.id || `msg_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+        
+        await Message.create({
+          organizationId: campaign.organizationId,
+          sentBy: campaign.createdBy,
+          to: phoneNumber,
+          type: 'template',
+          template: {
+            name: template?.name || 'campaign_template',
+            language: template?.language || 'en',
+            components: []
+          },
+          status: 'sent',
+          wamid
+        });
+
         // update campaign stats
         await Campaign.findByIdAndUpdate(campaignId, { $inc: { 'stats.sent': 1 } }, { new: true, upsert: true });
         return done(null, resp.data);
       } catch (err) {
         console.error('WhatsApp send error:', err.response ? err.response.data : err.message);
+        logger.error('webhook', `Meta API delivery failure to ${phoneNumber}`, err, {
+          campaignId,
+          contactId,
+          phoneNumber,
+          organizationId: campaign.organizationId,
+          metaResponse: err.response ? err.response.data : null
+        });
+        
+        await Message.create({
+          organizationId: campaign.organizationId,
+          sentBy: campaign.createdBy,
+          to: phoneNumber,
+          type: 'template',
+          template: {
+            name: template?.name || 'campaign_template',
+            language: template?.language || 'en',
+            components: []
+          },
+          status: 'failed',
+          errorDetails: err.response?.data?.error?.message || err.message
+        });
+
         await Campaign.findByIdAndUpdate(campaignId, { $inc: { 'stats.failed': 1 } }, { new: true, upsert: true });
         return done(new Error('WhatsApp send failed'));
       }
     }
 
     // If no WABA configured, just simulate success
+    const wamid = `sim_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+    await Message.create({
+      organizationId: campaign.organizationId,
+      sentBy: campaign.createdBy,
+      to: phoneNumber,
+      type: 'template',
+      template: {
+        name: template?.name || 'campaign_template',
+        language: template?.language || 'en',
+        components: []
+      },
+      status: 'sent',
+      wamid
+    });
+
     await Campaign.findByIdAndUpdate(campaignId, { $inc: { 'stats.sent': 1 } }, { new: true, upsert: true });
     return done(null, { simulated: true });
   } catch (err) {
     console.error('Worker processing error:', err);
+    logger.error('campaigns', `Worker job processing failed`, err, {
+      jobId: job?.id,
+      campaignId: job?.data?.campaignId,
+      organizationId: job?.data?.organizationId || null
+    });
     // increment failed counter
     if (job && job.data && job.data.campaignId) {
       try {
+        await Message.create({
+          organizationId: job.data.organizationId || null,
+          to: phoneNumber,
+          type: 'template',
+          template: {
+            name: 'campaign_template',
+            language: 'en',
+            components: []
+          },
+          status: 'failed',
+          errorDetails: err.message
+        });
         await Campaign.findByIdAndUpdate(job.data.campaignId, { $inc: { 'stats.failed': 1 } }, { new: true, upsert: true });
       } catch (e) {
         console.error('Failed updating campaign stats after worker error:', e);
@@ -83,9 +155,17 @@ queue.process(async (job, done) => {
   }
 });
 
-queue.on('error', (err) => console.error('Campaign queue error:', err));
+queue.on('error', (err) => {
+  console.error('Campaign queue error:', err);
+  logger.error('queue', `Campaign worker queue encountered error`, err);
+});
 queue.on('failed', async (job, err) => {
   console.warn(`Job ${job.id} failed:`, err.message || err);
+  logger.error('queue', `Campaign worker queue job ${job.id} failed`, err, {
+    jobId: job.id,
+    campaignId: job.data?.campaignId,
+    organizationId: job.data?.organizationId
+  });
 });
 queue.on('completed', async (job, result) => {
   // optionally log

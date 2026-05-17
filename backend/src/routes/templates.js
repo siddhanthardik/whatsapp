@@ -3,6 +3,7 @@ const router = express.Router();
 const { body, validationResult } = require('express-validator');
 
 const { verifyToken, requireRole } = require('../middleware/auth');
+const { checkLimit } = require('../middleware/subscriptionLimits');
 const templateController = require('../controllers/templateController');
 
 function handleValidation(req, res, next) {
@@ -21,7 +22,8 @@ router.get('/:id', verifyToken, templateController.getTemplateById);
 router.post(
   '/',
   verifyToken,
-  requireRole('campaign_manager', 'org_admin', 'super_admin'),
+  requireRole('manager', 'admin', 'owner', 'super_admin'),
+  checkLimit('templates'),
   [
     body('name').trim().notEmpty().withMessage('Display name is required'),
     body('templateId').optional().trim().matches(/^[a-z0-9_]+$/).withMessage('Template ID must be lowercase letters, numbers, and underscores'),
@@ -38,13 +40,13 @@ router.post(
 );
 
 // POST /api/templates/:id/submit - submit template to WhatsApp (DRAFT → PENDING)
-router.post('/:id/submit', verifyToken, requireRole('campaign_manager', 'org_admin', 'super_admin'), templateController.submitToWhatsApp);
+router.post('/:id/submit', verifyToken, requireRole('manager', 'admin', 'owner', 'super_admin'), templateController.submitToWhatsApp);
 
 // PUT /api/templates/:id - update template (only if DRAFT or REJECTED)
 router.put(
   '/:id',
   verifyToken,
-  requireRole('campaign_manager', 'org_admin', 'super_admin'),
+  requireRole('manager', 'admin', 'owner', 'super_admin'),
   [
     body('name').optional().trim().notEmpty().withMessage('Name cannot be empty'),
     body('body').optional().custom((value) => {
@@ -57,6 +59,6 @@ router.put(
 );
 
 // DELETE /api/templates/:id
-router.delete('/:id', verifyToken, requireRole('campaign_manager', 'org_admin', 'super_admin'), templateController.deleteTemplate);
+router.delete('/:id', verifyToken, requireRole('manager', 'admin', 'owner', 'super_admin'), templateController.deleteTemplate);
 
 module.exports = router;

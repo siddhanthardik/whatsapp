@@ -4,12 +4,11 @@ const { Schema } = mongoose;
 
 const AuditLogSchema = new Schema(
   {
+    organizationId: { type: Schema.Types.ObjectId, ref: 'Organization', required: true, index: true },
     action: { type: String, required: true },
-    actor: { type: Schema.Types.ObjectId, ref: 'User', default: null },
-    targetType: { type: String },
-    targetId: { type: Schema.Types.ObjectId },
-    details: { type: Schema.Types.Mixed },
-    organizationId: { type: Schema.Types.ObjectId, ref: 'Organization', default: null },
+    actorUserId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    targetUserId: { type: Schema.Types.ObjectId, ref: 'User', default: null },
+    metadata: { type: Schema.Types.Mixed, default: {} },
   },
   { timestamps: true }
 );

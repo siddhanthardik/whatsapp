@@ -23,15 +23,28 @@ async function verifyToken(req, res, next) {
       return sendError(res, 401, 'Invalid or expired token');
     }
 
-    // Prefer organizationId from token if provided (avoids extra DB lookup).
-    // Ensure req.user.organizationId is always present: if missing in token, load from DB.
-    let userObj = { id: String(payload.id), role: payload.role || 'support_agent', organizationId: payload.organizationId || null };
+    // Prefer organizationId and other details from token if provided (avoids extra DB lookup).
+    let userObj = {
+      id: String(payload.id),
+      email: payload.email || null,
+      role: payload.role || 'agent',
+      organizationId: payload.organizationId || null,
+      name: payload.name || null,
+      isActive: true,
+    };
 
-    if (!userObj.organizationId) {
-      // Lookup user to get organizationId and validate existence
+    if (!userObj.organizationId || !userObj.name || !userObj.email) {
+      // Lookup user to get details and validate existence
       const userDoc = await User.findById(payload.id).select('-password -twoFactorSecret -refreshTokens');
       if (!userDoc) return sendError(res, 401, 'User not found');
-      userObj = { id: String(userDoc._id), role: userDoc.role, organizationId: userDoc.organizationId || null, name: userDoc.name, isActive: userDoc.isActive };
+      userObj = {
+        id: String(userDoc._id),
+        email: userDoc.email,
+        role: userDoc.role,
+        organizationId: userDoc.organizationId || null,
+        name: userDoc.name,
+        isActive: userDoc.isActive,
+      };
     }
 
     req.user = userObj;
@@ -50,6 +63,7 @@ function requireRole(...roles) {
     try {
       const user = req.user;
       if (!user) return sendError(res, 401, 'Authentication required');
+      if (user.role === 'super_admin') return next();
       if (!roles.includes(user.role)) return sendError(res, 403, 'Insufficient permissions');
       return next();
     } catch (err) {

@@ -4,14 +4,14 @@ const jwt = require('jsonwebtoken');
 
 const { Schema } = mongoose;
 
-const roles = ['super_admin', 'org_admin', 'campaign_manager', 'analyst', 'support_agent'];
+const roles = ['super_admin', 'owner', 'admin', 'manager', 'agent', 'viewer'];
 
 const UserSchema = new Schema(
   {
     name: { type: String, required: true, trim: true },
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
     password: { type: String, required: true },
-    role: { type: String, enum: roles, default: 'support_agent' },
+    role: { type: String, enum: roles, default: 'agent' },
     organizationId: { type: Schema.Types.ObjectId, ref: 'Organization', default: null },
     isActive: { type: Boolean, default: true },
     isTwoFactorEnabled: { type: Boolean, default: false },
@@ -43,7 +43,13 @@ UserSchema.methods.comparePassword = function (candidatePassword) {
 
 // Generate access JWT
 UserSchema.methods.generateJWT = function () {
-  const payload = { id: this._id, role: this.role, organizationId: this.organizationId || null };
+  const payload = {
+    id: this._id,
+    email: this.email,
+    role: this.role,
+    organizationId: this.organizationId || null,
+    name: this.name,
+  };
   const secret = process.env.JWT_SECRET;
   const expiresIn = process.env.JWT_EXPIRES_IN || '1h';
   return jwt.sign(payload, secret, { expiresIn });

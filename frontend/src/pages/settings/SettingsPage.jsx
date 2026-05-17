@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import ConfirmModal from '../../components/shared/ConfirmModal'
 import { organizationsAPI } from '../../services/api'
+import Billing from './Billing'
 
 const T = {
   bg: '#F0F4F8',
@@ -209,7 +210,7 @@ export default function SettingsPage() {
           {/* placeholder tabs for notif/security/billing */}
           {tab === 'notif' && <div style={{ fontSize: 12, color: T.muted }}>Notification preferences (not connected)</div>}
           {tab === 'security' && <div style={{ fontSize: 12, color: T.muted }}>Security settings (not connected)</div>}
-          {tab === 'billing' && <div style={{ fontSize: 12, color: T.muted }}>Plan & billing (not connected)</div>}
+          {tab === 'billing' && <Billing />}
         </div>
 
         {dirty && (

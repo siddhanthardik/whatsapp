@@ -7,6 +7,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
+const logger = require('./src/utils/logger');
 
 // Route imports
 const authRoutes = require('./src/routes/auth');
@@ -23,7 +24,14 @@ const optRoutes = require('./src/routes/opt');
 const reportsRoutes = require('./src/routes/reports');
 const organizationRoutes = require('./src/routes/organization');
 const organizationsRoutes = require('./src/routes/organizations');
+const subscriptionRoutes = require('./src/routes/subscription');
+const superAdminRoutes = require('./src/routes/superAdmin');
+const startMonthlyResetJob = require('./src/jobs/monthlyReset');
+
 const app = express();
+
+// Start cron jobs
+startMonthlyResetJob();
 
 
 // ---------------- SECURITY ----------------
@@ -85,9 +93,11 @@ app.use("/api/analytics", analyticsRoutes);
 app.use("/api/webhooks", webhooksRoutes);
 app.use("/api/organization", organizationRoutes);
 app.use("/api/organizations", organizationsRoutes);
+app.use("/api/subscription", subscriptionRoutes);
 app.use("/api/opt-outs", optOutsRoutes);
 app.use("/api/reports", reportsRoutes);
 app.use("/api/opt", optRoutes);
+app.use("/api/super-admin", superAdminRoutes);
 
 // webhook for meta verify
 app.use("/webhook", require("./src/routes/webhooks.js"));
@@ -102,6 +112,14 @@ app.get("/", (req, res) =>
   })
 );
 
+app.get("/api/health", (req, res) =>
+  res.json({
+    success: true,
+    uptime: Math.round(process.uptime()),
+    api: "healthy"
+  })
+);
+
 
 // ---------------- 404 ----------------
 
@@ -113,7 +131,14 @@ app.use((req, res) =>
 // ---------------- ERROR ----------------
 
 app.use((err, req, res, next) => {
-  console.error(err);
+  logger.error('api', `Express Endpoint Error: ${req.method} ${req.originalUrl}`, err, {
+    ip: req.ip,
+    method: req.method,
+    url: req.originalUrl,
+    body: req.body ? JSON.parse(JSON.stringify(req.body)) : null,
+    user: req.user ? { id: req.user.id, role: req.user.role, organizationId: req.user.organizationId } : null
+  });
+
   res
     .status(err.status || 500)
     .json({ error: err.message || "Internal Server Error" });
@@ -138,7 +163,12 @@ process.on("SIGINT", async () => {
 });
 
 process.on("unhandledRejection", (reason, p) => {
-  console.error("Unhandled Rejection:", reason);
+  logger.critical('api', 'Unhandled Rejection on Server', reason instanceof Error ? reason : new Error(String(reason)));
+});
+
+process.on("uncaughtException", (err) => {
+  logger.critical('api', 'Uncaught Exception on Server', err);
+  setTimeout(() => process.exit(1), 1000);
 });
 
 module.exports = app;

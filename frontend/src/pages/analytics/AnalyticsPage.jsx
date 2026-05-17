@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useMessageTrends, useHeatmap, useTopTemplates, useAudienceGrowth, useDashboardStats } from "../../hooks/useAnalytics";
+import useAuthStore from "../../store/authStore";
 
 /* ─────────────────────────────────────────────
    DESIGN TOKENS
@@ -710,6 +711,7 @@ function Sparkline({ values, color, height=32, width=80 }) {
    MAIN ANALYTICS PAGE
 ───────────────────────────────────────────── */
 export default function AnalyticsPage() {
+  const { user } = useAuthStore();
   const [trendRange,     setTrendRange]     = useState(14);
   const [growthRange,    setGrowthRange]    = useState(8);
   const [metricPeriod,   setMetricPeriod]   = useState("30d");
@@ -786,30 +788,21 @@ export default function AnalyticsPage() {
   });
 
   return (
-    <div style={{ fontFamily:T.font, display:"flex", minHeight:"100vh", background:T.bg }}>
+    <div style={{ fontFamily:T.font, padding:"20px", display:"flex", flexDirection:"column", gap:16, minHeight:"100vh", background:T.bg }}>
       <style>{`
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
-        * { box-sizing:border-box; margin:0; padding:0; }
         ::-webkit-scrollbar { width:5px; height:5px; }
         ::-webkit-scrollbar-thumb { background:#CBD5E1; border-radius:99px; }
         button:hover { opacity:.9; }
       `}</style>
 
-      <div style={{ flex:1, minWidth:0, display:"flex", flexDirection:"column", overflowY:"auto" }}>
-
-        {/* ── TOPBAR ── */}
-        <div style={{ height:56, background:T.card, borderBottom:`1px solid ${T.border}`,
-          display:"flex", alignItems:"center", padding:"0 20px", gap:12,
-          position:"sticky", top:0, zIndex:10, flexShrink:0 }}>
-          <div style={{ flex:1 }}>
-            <div style={{ fontSize:15, fontWeight:700, color:T.text, letterSpacing:"-0.02em" }}>
-              Analytics
-            </div>
-            <div style={{ fontSize:10, color:T.subtle }}>
-              Sunday, 22 March 2025 · Data from WhatsApp Business API
-            </div>
-          </div>
-
+      {/* Header Controls */}
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 }}>
+        <div>
+          <h1 style={{ fontSize:22, fontWeight:700, color:T.text, letterSpacing:"-0.02em" }}>Analytics Overview</h1>
+          <p style={{ fontSize:12, color:T.subtle }}>Real-time telemetry and insights from WhatsApp Business API</p>
+        </div>
+        <div style={{ display:"flex", alignItems:"center", gap:12 }}>
           {/* Period selector */}
           <RangeSelector value={metricPeriod} onChange={setMetricPeriod} options={[
             { val:"1d", label:"Today" }, { val:"7d", label:"7 days" },
@@ -817,7 +810,7 @@ export default function AnalyticsPage() {
           ]}/>
 
           {/* Export */}
-          <button style={{ display:"flex", alignItems:"center", gap:6, padding:"7px 13px",
+          <button style={{ display:"flex", alignItems:"center", gap:6, padding:"8px 14px",
             borderRadius:8, border:`1px solid ${T.border}`, background:T.card,
             fontSize:12, color:T.muted, cursor:"pointer" }}>
             <svg width="13" height="13" fill="none" viewBox="0 0 24 24"
@@ -829,8 +822,9 @@ export default function AnalyticsPage() {
             Export
           </button>
         </div>
+      </div>
 
-        <div style={{ padding:"18px 20px", display:"flex", flexDirection:"column", gap:16 }}>
+      <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
 
           {/* ── ROW 1: METRIC CARDS ── */}
           <div style={{ display:"flex", gap:12, ...fadeIn(0) }}>
@@ -1061,11 +1055,11 @@ export default function AnalyticsPage() {
                   Today's snapshot
                 </div>
                 {[
-                  { label:"Messages sent",    val:"21.4k", color:T.blue  },
-                  { label:"Delivery rate",    val:"97.1%", color:T.teal  },
-                  { label:"Open rate",        val:"68.6%", color:T.green },
-                  { label:"Opt-outs today",   val:"58",    color:T.red   },
-                  { label:"Active campaigns", val:"2",     color:T.amber },
+                  { label:"Messages sent",    val: (dashboardRes?.totalSentToday ?? dashboardRes?.sentToday ?? totalSent).toLocaleString(), color:T.blue  },
+                  { label:"Delivery rate",    val: `${dashboardRes?.deliveryRate ?? avgDelivery}%`, color:T.teal  },
+                  { label:"Open rate",        val: `${dashboardRes?.openRate ?? avgOpen}%`, color:T.green },
+                  { label:"Opt-outs today",   val: (dashboardRes?.optOutCount ?? totalOptOut).toString(),    color:T.red   },
+                  { label:"Active campaigns", val: (dashboardRes?.activeCampaigns ?? 0).toString(),     color:T.amber },
                 ].map(r => (
                   <div key={r.label} style={{ display:"flex", justifyContent:"space-between",
                     padding:"4px 0", borderBottom:`1px solid ${T.border}`,
@@ -1083,12 +1077,11 @@ export default function AnalyticsPage() {
           {/* Footer */}
           <div style={{ display:"flex", justifyContent:"space-between",
             fontSize:11, color:T.subtle, padding:"0 2px 8px" }}>
-            <span>WhatsApp Business Platform · Analytics · Acme Corp</span>
+            <span>WhatsApp Business Platform · Analytics · {user?.organization?.name || 'Acme Corp'}</span>
             <span>Data refreshes every 5 minutes · Last refresh: just now</span>
           </div>
 
         </div>
       </div>
-    </div>
   );
 }

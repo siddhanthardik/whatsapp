@@ -17,6 +17,7 @@ import { useCampaigns } from '../../hooks/useCampaigns'
 import MetricCard from '../../components/shared/MetricCard'
 import DataTable from '../../components/shared/DataTable'
 import StatusBadge from '../../components/shared/StatusBadge'
+import useAuthStore from '../../store/authStore'
 
 function fmtNumber(v) {
   if (v == null) return '—'
@@ -24,6 +25,26 @@ function fmtNumber(v) {
 }
 
 export default function DashboardPage() {
+  const { user } = useAuthStore()
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => {
+    setMounted(true)
+  }, [])
+
+  const subscription = user?.subscription || {
+    plan: 'free',
+    maxContacts: 500,
+    currentContacts: 0,
+    maxMessagesPerMonth: 1000,
+    currentMessagesThisMonth: 0,
+  }
+
+  const contactsPct = Math.min(100, Math.round(((subscription.currentContacts || 0) / (subscription.maxContacts || 500)) * 100))
+  const messagesPct = Math.min(100, Math.round(((subscription.currentMessagesThisMonth || 0) / (subscription.maxMessagesPerMonth || 1000)) * 100))
+  const nearContactsLimit = contactsPct >= 80
+  const nearMessagesLimit = messagesPct >= 80
+  const showWarningBanner = nearContactsLimit || nearMessagesLimit
+
   const [period, setPeriod] = useState(30) // days: 1, 7, 30
   const { data: stats, isLoading: statsLoading } = useDashboardStats({ days: period })
   const { data: trends = [], isLoading: trendsLoading } = useMessageTrends(period)
@@ -109,9 +130,37 @@ export default function DashboardPage() {
 
   return (
     <div className="p-6 space-y-6">
+      {/* Proactive Quota Exhaustion Warning Banner */}
+      {showWarningBanner && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex flex-col md:flex-row items-center justify-between gap-4 shadow-sm animate-in fade-in slide-in-from-top-4 duration-300">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center text-amber-800 text-lg">
+              ⚠️
+            </div>
+            <div>
+              <h3 className="font-semibold text-amber-900 text-sm">Subscription Limit Warning</h3>
+              <p className="text-xs text-amber-700">
+                You have reached{' '}
+                <strong>
+                  {nearContactsLimit ? `${contactsPct}% of your contact storage limit` : `${messagesPct}% of your monthly messages limit`}
+                </strong>
+                . Upgrade now to ensure seamless WhatsApp broadcasting.
+              </p>
+            </div>
+          </div>
+          <Link
+            to="/settings"
+            state={{ activeTab: 'billing' }}
+            className="w-full md:w-auto px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-medium text-xs text-center transition-all shadow-sm"
+          >
+            Upgrade Plan
+          </Link>
+        </div>
+      )}
+
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">Dashboard</h1>
+          <h1 className="text-2xl font-semibold text-slate-800">Dashboard</h1>
           <div className="text-sm text-gray-500">Overview of activity and trends</div>
         </div>
 
@@ -149,6 +198,65 @@ export default function DashboardPage() {
         ))}
       </div>
 
+      {/* Quota Progress Card Row */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        
+        {/* Contacts Quota Card */}
+        <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Contact Storage Quota</span>
+              <h3 className="text-lg font-bold text-slate-800 mt-1">
+                {subscription.currentContacts?.toLocaleString() || 0} <span className="text-sm font-normal text-slate-500">/ {subscription.maxContacts?.toLocaleString() || 500} allowed</span>
+              </h3>
+            </div>
+            <span className={`px-2 py-0.5 rounded text-xs font-bold ${contactsPct >= 90 ? 'bg-red-50 text-red-700' : contactsPct >= 70 ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'}`}>
+              {contactsPct}% Used
+            </span>
+          </div>
+          
+          <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden mb-2">
+            <div
+              className={`h-full rounded-full transition-all duration-500 ${contactsPct >= 90 ? 'bg-red-500' : contactsPct >= 70 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+              style={{ width: `${contactsPct}%` }}
+            />
+          </div>
+          
+          <div className="flex justify-between text-xs text-slate-400">
+            <span>Enterprise Contacts Storage</span>
+            <span>{Math.max(0, (subscription.maxContacts || 500) - (subscription.currentContacts || 0)).toLocaleString()} remaining</span>
+          </div>
+        </div>
+
+        {/* Messages Quota Card */}
+        <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Monthly Outbound Volume</span>
+              <h3 className="text-lg font-bold text-slate-800 mt-1">
+                {subscription.currentMessagesThisMonth?.toLocaleString() || 0} <span className="text-sm font-normal text-slate-500">/ {subscription.maxMessagesPerMonth?.toLocaleString() || 1000} monthly</span>
+              </h3>
+            </div>
+            <span className={`px-2 py-0.5 rounded text-xs font-bold ${messagesPct >= 90 ? 'bg-red-50 text-red-700' : messagesPct >= 70 ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'}`}>
+              {messagesPct}% Used
+            </span>
+          </div>
+          
+          <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden mb-2">
+            <div
+              className={`h-full rounded-full transition-all duration-500 ${messagesPct >= 90 ? 'bg-red-500' : messagesPct >= 70 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+              style={{ width: `${messagesPct}%` }}
+            />
+          </div>
+          
+          <div className="flex justify-between text-xs text-slate-400">
+            <span>Broadcasting monthly volume resets next cycle</span>
+            <span>{Math.max(0, (subscription.maxMessagesPerMonth || 1000) - (subscription.currentMessagesThisMonth || 0)).toLocaleString()} messages left</span>
+          </div>
+        </div>
+
+      </div>
+
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 bg-white border border-gray-100 rounded-lg p-4">
@@ -160,17 +268,21 @@ export default function DashboardPage() {
             </div>
           </div>
           <div style={{ height: 260 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={trendsData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
-                <XAxis dataKey="date" tick={{ fontSize: 12 }} />
-                <YAxis tick={{ fontSize: 12 }} />
-                <Tooltip content={<CustomTrendTooltip />} />
-                <Line type="monotone" dataKey="sent" stroke="#10B981" strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="delivered" stroke="#3B82F6" strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="read" stroke="#7C3AED" strokeWidth={2} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
+            {mounted ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={trendsData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
+                  <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                  <YAxis tick={{ fontSize: 12 }} />
+                  <Tooltip content={<CustomTrendTooltip />} />
+                  <Line type="monotone" dataKey="sent" stroke="#10B981" strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="delivered" stroke="#3B82F6" strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="read" stroke="#7C3AED" strokeWidth={2} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="w-full h-full flex items-center justify-center bg-slate-50 rounded text-xs text-slate-400">Loading chart...</div>
+            )}
           </div>
         </div>
 
@@ -180,15 +292,19 @@ export default function DashboardPage() {
             <a href="#" onClick={(e)=>{e.preventDefault(); window.location.href='/campaigns'}} className="text-sm text-blue-600 hover:underline">View all ↗</a>
           </div>
           <div style={{ height: 260 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={campaigns.slice(0, 5)}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
-                <XAxis dataKey="name" tick={{ fontSize: 12 }} />
-                <YAxis tick={{ fontSize: 12 }} />
-                <Tooltip />
-                <Bar dataKey="open" fill="#7C3AED" />
-              </BarChart>
-            </ResponsiveContainer>
+            {mounted ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={campaigns.slice(0, 5)}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
+                  <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                  <YAxis tick={{ fontSize: 12 }} />
+                  <Tooltip />
+                  <Bar dataKey="open" fill="#7C3AED" />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="w-full h-full flex items-center justify-center bg-slate-50 rounded text-xs text-slate-400">Loading chart...</div>
+            )}
           </div>
         </div>
       </div>

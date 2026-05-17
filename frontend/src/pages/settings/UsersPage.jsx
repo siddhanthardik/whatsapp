@@ -11,13 +11,17 @@ const T = {
   green: '#00A884',
 }
 
-function Avatar({ name, size = 34 }) {
+function Avatar({ name = '', size = 34 }) {
   const cols = ['#00A884', '#2563EB', '#7C3AED', '#D97706', '#0D9488', '#DB2777', '#EA580C', '#0891B2']
   let h = 0
-  for (const c of name) h = (h << 5) - h + c.charCodeAt(0)
+  const safeName = typeof name === 'string' ? name.trim() : ''
+  if (!safeName) {
+    return <div style={{ width: size, height: size, borderRadius: '50%', background: '#64748B', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: size * 0.34, fontWeight: 700, color: '#fff' }}>?</div>
+  }
+  for (const c of safeName) h = (h << 5) - h + c.charCodeAt(0)
   const bg = cols[Math.abs(h) % cols.length]
-  const ini = name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase()
-  return <div style={{ width: size, height: size, borderRadius: '50%', background: bg, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: size * 0.34, fontWeight: 700, color: '#fff' }}>{ini}</div>
+  const ini = safeName.split(/\s+/).map(w => w ? w[0] : '').slice(0, 2).join('').toUpperCase()
+  return <div style={{ width: size, height: size, borderRadius: '50%', background: bg, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: size * 0.34, fontWeight: 700, color: '#fff' }}>{ini || '?'}</div>
 }
 
 export default function UsersPage() {
@@ -26,7 +30,7 @@ export default function UsersPage() {
   const [search, setSearch] = useState('')
   const [roleF, setRoleF] = useState('all')
   const [invOpen, setInvOpen] = useState(false)
-  const [invForm, setInvForm] = useState({ name: '', email: '', role: 'campaign_manager' })
+  const [invForm, setInvForm] = useState({ name: '', email: '', password: '', role: 'agent' })
   const [confirmRem, setConfirmRem] = useState(null)
   const [toast, setToast] = useState(null)
 
@@ -34,9 +38,11 @@ export default function UsersPage() {
     setLoading(true)
     try {
       const res = await usersAPI.list()
-      setMembers(res.data || [])
+      const rawData = res.data?.data?.users || res.data?.users || res.data || []
+      setMembers(Array.isArray(rawData) ? rawData : [])
     } catch (e) {
-      console.error(e)
+      console.error('Failed to fetch members:', e)
+      setMembers([])
     } finally {
       setLoading(false)
     }
@@ -47,14 +53,17 @@ export default function UsersPage() {
   const showToast = msg => { setToast(msg); setTimeout(() => setToast(null), 3000) }
 
   const handleInvite = async () => {
-    if (!invForm.name || !invForm.email) return showToast('Name and email required')
+    if (!invForm.name || !invForm.email || !invForm.password) return showToast('Name, email, and password required')
     try {
       await usersAPI.create(invForm)
       setInvOpen(false)
-      setInvForm({ name: '', email: '', role: 'campaign_manager' })
+      setInvForm({ name: '', email: '', password: '', role: 'agent' })
       fetchMembers()
-      showToast('Invitation sent')
-    } catch (e) { showToast('Failed to invite') }
+      showToast('Member created successfully')
+    } catch (e) { 
+      const errMsg = e.response?.data?.message || 'Failed to create member'
+      showToast(errMsg) 
+    }
   }
 
   const handleRemove = async (m) => {
@@ -69,23 +78,27 @@ export default function UsersPage() {
   const handleToggle = async (m) => {
     try {
       const id = m._id || m.id
-      await usersAPI.update(id, { status: m.status === 'active' ? 'inactive' : 'active' })
+      await usersAPI.update(id, { isActive: m.isActive === true ? false : true })
       fetchMembers()
       showToast('Status updated')
     } catch (e) { showToast('Update failed') }
   }
 
-  const filtered = members.filter(m => {
+  const filtered = Array.isArray(members) ? members.filter(m => {
+    if (!m) return false
     const q = search.toLowerCase()
-    return (!search || m.name.toLowerCase().includes(q) || m.email.toLowerCase().includes(q)) && (roleF === 'all' || m.role === roleF)
-  })
+    const name = String(m.name || '').toLowerCase()
+    const email = String(m.email || '').toLowerCase()
+    return (!search || name.includes(q) || email.includes(q)) && (roleF === 'all' || m.role === roleF)
+  }) : []
 
   const ROLE_CFG = {
     super_admin: { label: 'Super Admin', bg: '#FEF3C7', color: '#92400E' },
-    org_admin: { label: 'Org Admin', bg: '#EFF6FF', color: '#1D4ED8' },
-    campaign_manager: { label: 'Campaign Manager', bg: '#ECFDF5', color: '#065F46' },
-    analyst: { label: 'Analyst', bg: '#F5F3FF', color: '#5B21B6' },
-    support_agent: { label: 'Support Agent', bg: '#FFF7ED', color: '#9A3412' },
+    owner: { label: 'Owner', bg: '#EFF6FF', color: '#1D4ED8' },
+    admin: { label: 'Admin', bg: '#F5F3FF', color: '#5B21B6' },
+    manager: { label: 'Manager', bg: '#ECFDF5', color: '#065F46' },
+    agent: { label: 'Agent', bg: '#FFF7ED', color: '#9A3412' },
+    viewer: { label: 'Viewer', bg: '#F3F4F6', color: '#374151' },
   }
 
   return (
@@ -93,9 +106,9 @@ export default function UsersPage() {
       <div style={{ height: 54, background: T.card, borderBottom: `1px solid ${T.border}`, display: 'flex', alignItems: 'center', padding: '0 18px', gap: 10, position: 'sticky', top: 0, zIndex: 10, flexShrink: 0 }}>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: T.text, letterSpacing: '-0.02em' }}>Team Management</div>
-          <div style={{ fontSize: 10, color: T.muted }}>{members.length} members · Acme Corp</div>
+          <div style={{ fontSize: 10, color: T.muted }}>{members.length} members</div>
         </div>
-        <button onClick={() => setInvOpen(true)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 13px', borderRadius: 8, border: 'none', background: T.green, color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Invite member</button>
+        <button onClick={() => setInvOpen(true)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 13px', borderRadius: 8, border: 'none', background: T.green, color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Add Member</button>
       </div>
 
       <div style={{ flex: 1, overflowY: 'auto', padding: '14px 18px' }}>
@@ -127,14 +140,43 @@ export default function UsersPage() {
               </tr>
             </thead>
             <tbody>
-              {loading && <tr><td colSpan={5} style={{ padding: 18 }}>Loading…</td></tr>}
+              {loading && (
+                <tr>
+                  <td colSpan={5} style={{ padding: '40px 0', textAlign: 'center' }}>
+                    <div style={{ display: 'inline-block', width: 28, height: 28, border: `3px solid ${T.border}`, borderTop: `3px solid ${T.green}`, borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+                    <style>{`
+                      @keyframes spin {
+                        0% { transform: rotate(0deg); }
+                        100% { transform: rotate(360deg); }
+                      }
+                    `}</style>
+                    <div style={{ marginTop: 8, fontSize: 12, color: T.muted, fontWeight: 500 }}>Loading team members...</div>
+                  </td>
+                </tr>
+              )}
+              {!loading && filtered.length === 0 && (
+                <tr>
+                  <td colSpan={5} style={{ padding: '48px 0', textAlign: 'center' }}>
+                    <div style={{ fontSize: 24, marginBottom: 8 }}>👥</div>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: T.text }}>No team members found</div>
+                    <div style={{ fontSize: 12, color: T.muted, marginTop: 4, maxWidth: 320, margin: '4px auto 12px', lineHeight: 1.5 }}>
+                      {search ? "We couldn't find any team members matching your search criteria." : "There are currently no team members in this organization."}
+                    </div>
+                    {search && (
+                      <button onClick={() => setSearch('')} style={{ padding: '6px 12px', borderRadius: 8, border: `1px solid ${T.border}`, background: '#fff', fontSize: 11, fontWeight: 600, color: T.text, cursor: 'pointer' }}>
+                        Clear search
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              )}
               {!loading && filtered.map(m => (
                 <tr key={m._id || m.id} style={{ borderBottom: `1px solid ${T.border}` }}>
                   <td style={{ padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 12 }}>
                     <Avatar name={m.name} />
                     <div>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{m.name}</div>
-                      <div style={{ fontSize: 12, color: T.muted }}>{m.email}</div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{m.name || 'Unknown User'}</div>
+                      <div style={{ fontSize: 12, color: T.muted }}>{m.email || '—'}</div>
                     </div>
                   </td>
                   <td style={{ padding: '12px 14px' }}>
@@ -142,7 +184,7 @@ export default function UsersPage() {
                   </td>
                   <td style={{ padding: '12px 14px', color: T.muted }}>{m.lastLogin || 'Never'}</td>
                   <td style={{ padding: '12px 14px' }}>
-                    <button onClick={() => handleToggle(m)} style={{ padding: '6px 10px', borderRadius: 8, border: `1px solid ${T.border}`, background: m.status === 'active' ? T.green : '#F8FAFC', color: m.status === 'active' ? '#fff' : T.muted, cursor: 'pointer' }}>{m.status === 'active' ? 'Active' : 'Inactive'}</button>
+                    <button onClick={() => handleToggle(m)} style={{ padding: '6px 10px', borderRadius: 8, border: `1px solid ${T.border}`, background: m.isActive !== false ? T.green : '#F8FAFC', color: m.isActive !== false ? '#fff' : T.muted, cursor: 'pointer' }}>{m.isActive !== false ? 'Active' : 'Inactive'}</button>
                   </td>
                   <td style={{ padding: '12px 14px' }}>
                     <div style={{ display: 'flex', gap: 8 }}>
@@ -158,7 +200,54 @@ export default function UsersPage() {
         <div style={{ background: T.card, borderRadius: 12, border: `1px solid ${T.border}`, overflow: 'hidden' }}>
           <div style={{ padding: '12px 14px', borderBottom: `1px solid ${T.border}`, background: T.bg, fontSize: 12, fontWeight: 700, color: T.text }}>Role permissions reference</div>
           <div style={{ overflowX: 'auto', padding: 12 }}>
-            <div style={{ minWidth: 640, fontSize: 13, color: T.muted }}>Permissions table not implemented — refer to server ACL.</div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, textAlign: 'left' }}>
+              <thead>
+                <tr style={{ borderBottom: `1px solid ${T.border}`, color: T.text }}>
+                  <th style={{ padding: 6 }}>Role</th>
+                  <th style={{ padding: 6 }}>Organization Scoped</th>
+                  <th style={{ padding: 6 }}>Manage Campaigns</th>
+                  <th style={{ padding: 6 }}>Manage Contacts</th>
+                  <th style={{ padding: 6 }}>Invite Users</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr style={{ borderBottom: `1px solid ${T.border}` }}>
+                  <td style={{ padding: 6, fontWeight: 600 }}>Owner</td>
+                  <td style={{ padding: 6, color: T.green }}>Full Access (Yes)</td>
+                  <td style={{ padding: 6, color: T.green }}>Yes</td>
+                  <td style={{ padding: 6, color: T.green }}>Yes</td>
+                  <td style={{ padding: 6, color: T.green }}>Yes</td>
+                </tr>
+                <tr style={{ borderBottom: `1px solid ${T.border}` }}>
+                  <td style={{ padding: 6, fontWeight: 600 }}>Admin</td>
+                  <td style={{ padding: 6, color: T.green }}>Manage Org (Yes)</td>
+                  <td style={{ padding: 6, color: T.green }}>Yes</td>
+                  <td style={{ padding: 6, color: T.green }}>Yes</td>
+                  <td style={{ padding: 6, color: T.green }}>Yes</td>
+                </tr>
+                <tr style={{ borderBottom: `1px solid ${T.border}` }}>
+                  <td style={{ padding: 6, fontWeight: 600 }}>Manager</td>
+                  <td style={{ padding: 6, color: T.muted }}>No (Org Member)</td>
+                  <td style={{ padding: 6, color: T.green }}>Yes</td>
+                  <td style={{ padding: 6, color: T.green }}>Yes</td>
+                  <td style={{ padding: 6, color: 'red' }}>No</td>
+                </tr>
+                <tr style={{ borderBottom: `1px solid ${T.border}` }}>
+                  <td style={{ padding: 6, fontWeight: 600 }}>Agent</td>
+                  <td style={{ padding: 6, color: T.muted }}>No</td>
+                  <td style={{ padding: 6, color: T.muted }}>No (Send Only)</td>
+                  <td style={{ padding: 6, color: T.green }}>Yes</td>
+                  <td style={{ padding: 6, color: 'red' }}>No</td>
+                </tr>
+                <tr style={{ borderBottom: `1px solid ${T.border}` }}>
+                  <td style={{ padding: 6, fontWeight: 600 }}>Viewer</td>
+                  <td style={{ padding: 6, color: T.muted }}>No</td>
+                  <td style={{ padding: 6, color: 'red' }}>Read Only</td>
+                  <td style={{ padding: 6, color: 'red' }}>Read Only</td>
+                  <td style={{ padding: 6, color: 'red' }}>No</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
       </div>
@@ -167,8 +256,8 @@ export default function UsersPage() {
       {invOpen && (
         <div onClick={() => setInvOpen(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200 }}>
           <div onClick={e => e.stopPropagation()} style={{ background: T.card, borderRadius: 14, width: 430, padding: 22 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: T.text, marginBottom: 6 }}>Invite team member</div>
-            <div style={{ fontSize: 11, color: T.muted, marginBottom: 12 }}>They'll receive an email to set their password and activate their account.</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: T.text, marginBottom: 6 }}>Add team member</div>
+            <div style={{ fontSize: 11, color: T.muted, marginBottom: 12 }}>Define their credentials and access role for immediate setup.</div>
             <div style={{ marginBottom: 12 }}>
               <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Full name</label>
               <input value={invForm.name} onChange={e => setInvForm(f => ({ ...f, name: e.target.value }))} placeholder="Priya Sharma" style={{ width: '100%', padding: '8px 11px', borderRadius: 8, border: `1px solid ${T.border}`, fontSize: 12 }} />
@@ -177,9 +266,22 @@ export default function UsersPage() {
               <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Email address</label>
               <input value={invForm.email} onChange={e => setInvForm(f => ({ ...f, email: e.target.value }))} placeholder="priya@acmecorp.in" style={{ width: '100%', padding: '8px 11px', borderRadius: 8, border: `1px solid ${T.border}`, fontSize: 12 }} />
             </div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Password</label>
+              <input type="password" value={invForm.password} onChange={e => setInvForm(f => ({ ...f, password: e.target.value }))} placeholder="••••••••" style={{ width: '100%', padding: '8px 11px', borderRadius: 8, border: `1px solid ${T.border}`, fontSize: 12 }} />
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 6 }}>Role</label>
+              <select value={invForm.role} onChange={e => setInvForm(f => ({ ...f, role: e.target.value }))} style={{ width: '100%', padding: '8px 11px', borderRadius: 8, border: `1px solid ${T.border}`, fontSize: 12, background: '#fff' }}>
+                <option value="viewer">Viewer</option>
+                <option value="agent">Agent</option>
+                <option value="manager">Manager</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
             <div style={{ display: 'flex', gap: 9, justifyContent: 'flex-end' }}>
               <button onClick={() => setInvOpen(false)} style={{ padding: '8px 12px', borderRadius: 8, border: `1px solid ${T.border}`, background: '#fff', cursor: 'pointer' }}>Cancel</button>
-              <button onClick={handleInvite} style={{ padding: '8px 12px', borderRadius: 8, border: 'none', background: T.green, color: '#fff', cursor: 'pointer' }}>Send invite</button>
+              <button onClick={handleInvite} style={{ padding: '8px 12px', borderRadius: 8, border: 'none', background: T.green, color: '#fff', cursor: 'pointer' }}>Add Member</button>
             </div>
           </div>
         </div>

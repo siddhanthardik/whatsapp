@@ -30,6 +30,12 @@ api.interceptors.response.use(
   (res) => res,
   (err) => {
     const status = err?.response?.status
+    if (err?.response?.data?.code === 'PLAN_LIMIT_REACHED') {
+      try {
+        useAuthStore.getState().setShowUpgradeModal(true, err.response.data.message || 'You have reached your subscription limit.')
+      } catch (e) { }
+      return Promise.reject(err)
+    }
     if (status === 401) {
       try {
         useAuthStore.getState().clearAuth()
@@ -56,6 +62,8 @@ export const authAPI = {
   forgotPassword: (email) => api.post('/auth/forgot-password', { email }),
   resetPassword: (token, password) => api.post('/auth/reset-password', { token, password }),
   verify2fa: (payload) => api.post('/auth/verify-2fa', payload),
+  me: () => api.get('/auth/me'),
+  updateProfile: (id, payload) => api.put(`/users/${id}`, payload),
 }
 
 export const contactGroupsAPI = {
@@ -134,10 +142,10 @@ export const reportsAPI = {
 }
 
 export const optAPI = {
-  optInList: (params) => api.get('/opt/in', { params }),
-  optOutList: (params) => api.get('/opt/out', { params }),
-  manualOptOut: (contactId, reason) => api.post(`/opt/manual/out`, { contactId, reason }),
-  manualOptIn: (contactId) => api.post(`/opt/manual/in`, { contactId }),
+  optInList: (params) => api.get('/opt/ins', { params }),
+  optOutList: (params) => api.get('/opt/outs', { params }),
+  manualOptOut: (contactId, reason) => api.post(`/opt/contacts/${contactId}/opt-out`, { reason }),
+  manualOptIn: (contactId) => api.post(`/opt/contacts/${contactId}/opt-in`),
 }
 
 export const usersAPI = {
@@ -148,11 +156,23 @@ export const usersAPI = {
   delete: (id) => api.delete(`/users/${id}`),
 }
 
+export const subscriptionAPI = {
+  get: () => api.get('/subscription'),
+  upgrade: (plan, billingCycle = 'monthly') => api.post('/subscription/upgrade', { plan, billingCycle }),
+}
+
 export const organizationsAPI = {
   get: (params) => api.get('/organization', { params }),
   update: (payload) => api.put('/organization', payload),
   getMe: (params) => api.get('/organizations/me', { params }),
   patchMe: (payload) => api.patch('/organizations/me', payload),
+}
+
+export const superAdminAPI = {
+  telemetry: () => api.get('/super-admin/telemetry'),
+  systemHealth: () => api.get('/super-admin/system-health'),
+  logs: (params) => api.get('/super-admin/logs', { params }),
+  resolveLog: (id, notes) => api.put(`/super-admin/logs/${id}/resolve`, { notes }),
 }
 
 export default api

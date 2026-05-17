@@ -12,8 +12,10 @@ import {
   FiUserCheck,
   FiPlus,
   FiLogOut,
+  FiSliders,
 } from 'react-icons/fi'
 import useAuthStore from '../../store/authStore'
+import { hasPermission } from '../../utils/permissions'
 
 export default function Sidebar({ widthClass = 'w-64' }) {
   const location = useLocation()
@@ -30,6 +32,8 @@ export default function Sidebar({ widthClass = 'w-64' }) {
     { key: 'reports', label: 'Reports', to: '/reports/delivery', Icon: FiClipboard },
     { key: 'opt', label: 'Opt-In/Out', to: '/reports/opt-in-out', Icon: FiToggleRight },
     { key: 'settings', label: 'Settings', to: '/settings', Icon: FiSettings },
+    { key: 'super-admin', label: 'Platform Admin', to: '/super-admin', Icon: FiSliders },
+    { key: 'system-health', label: 'System Health', to: '/platform-admin/system-health', Icon: FiClipboard },
   ]
 
   function isActive(path) {
@@ -55,7 +59,17 @@ export default function Sidebar({ widthClass = 'w-64' }) {
 
       <nav className="flex-1 px-2 py-4 overflow-y-auto">
         {menu.map((m) => {
-          if (role === 'support_agent' && (m.key === 'analytics' || m.key === 'reports')) return null
+          // Dynamic role rules matrix
+          const roleRules = {
+            super_admin: ['dashboard', 'contacts', 'templates', 'campaigns', 'analytics', 'reports', 'opt', 'settings', 'super-admin', 'system-health'],
+            owner: ['dashboard', 'contacts', 'templates', 'campaigns', 'analytics', 'reports', 'opt', 'settings'],
+            admin: ['dashboard', 'contacts', 'templates', 'campaigns', 'analytics', 'reports', 'opt', 'settings'],
+            manager: ['dashboard', 'contacts', 'templates', 'campaigns', 'analytics', 'reports', 'opt'],
+            agent: ['dashboard', 'contacts', 'campaigns'],
+            viewer: ['dashboard', 'analytics'],
+          }
+          const allowedKeys = roleRules[role] || ['dashboard']
+          if (!allowedKeys.includes(m.key)) return null
 
           const Active = isActive(m.to)
           return (
@@ -72,7 +86,7 @@ export default function Sidebar({ widthClass = 'w-64' }) {
                 <m.Icon className="w-5 h-5" />
                 <span className="flex-1">{m.label}</span>
 
-                {m.key === 'campaigns' && role !== 'analyst' ? (
+                {m.key === 'campaigns' && hasPermission(role, 'manager') ? (
                   <button type="button" onClick={(ev) => { ev.stopPropagation(); navigate('/campaigns/new') }} className="ml-2 text-slate-300 hover:text-white">
                     <FiPlus className="w-4 h-4" />
                   </button>
@@ -82,7 +96,7 @@ export default function Sidebar({ widthClass = 'w-64' }) {
           )
         })}
 
-        {(role === 'super_admin' || role === 'org_admin') && (
+        {['super_admin', 'owner', 'admin'].includes(role) && (
           <div className="mt-4">
             <Link
               to="/settings/users"

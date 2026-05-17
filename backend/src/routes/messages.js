@@ -7,7 +7,7 @@ const Message = require('../models/Message');
 router.post(
   '/send',
   verifyToken,
-  requireRole('campaign_manager', 'support_agent', 'org_admin', 'super_admin'),
+  requireRole('manager', 'agent', 'admin', 'owner', 'super_admin'),
   async (req, res) => {
     try {
       const { to, type, text, template } = req.body;

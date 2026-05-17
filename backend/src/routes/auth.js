@@ -67,4 +67,7 @@ router.post(
 	authController.verify2FA
 );
 
+// GET /api/auth/me (authenticated)
+router.get('/me', verifyToken, authController.getMe);
+
 module.exports = router;

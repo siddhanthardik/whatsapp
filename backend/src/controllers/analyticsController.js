@@ -18,63 +18,100 @@ function requireUser(req, res) {
   return user;
 }
 
+// Permission boundary filter helper
+const getQueryFilter = (user, baseFilter = {}) => {
+  const filter = { ...baseFilter };
+  if (user.role === 'super_admin') {
+    // Platform-level access, no tenant restriction
+  } else {
+    filter.organizationId = new mongoose.Types.ObjectId(user.organizationId);
+    if (user.role === 'agent') {
+      // Agents can only see messages sent by themselves
+      filter.sentBy = new mongoose.Types.ObjectId(user.id);
+    }
+  }
+  return filter;
+};
+
 // GET /analytics/dashboard
 exports.getDashboardStats = async (req, res) => {
   try {
     const user = requireUser(req, res);
     if (!user) return;
 
-    const orgId = user.organizationId ? new mongoose.Types.ObjectId(user.organizationId) : null;
+    const orgId = user.role !== 'super_admin' ? user.organizationId : null;
+    const baseFilter = orgId ? { organizationId: new mongoose.Types.ObjectId(orgId) } : {};
 
-    // messages counts for today/week/month and overall rates
+    // Get metadata counts scoped by tenant
+    const contacts = await Contact.countDocuments(baseFilter);
+    const campaigns = await Campaign.countDocuments(baseFilter);
+    const activeCampaigns = await Campaign.countDocuments({
+      ...baseFilter,
+      status: { $in: ['running', 'scheduled'] }
+    });
+    const activeTemplates = await Template.countDocuments({
+      ...baseFilter,
+      status: 'approved'
+    });
+    const optIns = await Contact.countDocuments({
+      ...baseFilter,
+      optInStatus: 'opted_in'
+    });
+    const optOuts = await Contact.countDocuments({
+      ...baseFilter,
+      optInStatus: 'opted_out'
+    });
+
+    // Scoped message counts with role-awareness
+    const messageFilter = getQueryFilter(user);
     const now = new Date();
     const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const startOfWeek = new Date(startOfDay);
     startOfWeek.setDate(startOfWeek.getDate() - ((startOfWeek.getDay() + 6) % 7)); // monday
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-    // We need to join Message -> Campaign to scope by organizationId
-    const baseMatch = { $expr: { $eq: ['$campaignId', '$$campaignId'] } };
+    const [
+      totalToday,
+      totalWeek,
+      totalMonth,
+      sent,
+      delivered,
+      read,
+      failed
+    ] = await Promise.all([
+      Message.countDocuments({ ...messageFilter, createdAt: { $gte: startOfDay } }),
+      Message.countDocuments({ ...messageFilter, createdAt: { $gte: startOfWeek } }),
+      Message.countDocuments({ ...messageFilter, createdAt: { $gte: startOfMonth } }),
+      Message.countDocuments({ ...messageFilter, status: { $in: ['sent', 'delivered', 'read'] } }),
+      Message.countDocuments({ ...messageFilter, status: { $in: ['delivered', 'read'] } }),
+      Message.countDocuments({ ...messageFilter, status: 'read' }),
+      Message.countDocuments({ ...messageFilter, status: 'failed' })
+    ]);
 
-    // Use aggregation with $lookup to join campaigns then facet counts
-    const pipeline = [
-      { $lookup: {
-          from: 'campaigns',
-          localField: 'campaignId',
-          foreignField: '_id',
-          as: 'campaign',
-        }
+    const deliveryRate = sent > 0 ? Number(((delivered / sent) * 100).toFixed(1)) : 0;
+    const openRate = delivered > 0 ? Number(((read / delivered) * 100).toFixed(1)) : 0;
+
+    return sendResponse(res, true, {
+      overview: {
+        contacts,
+        campaigns,
+        sent,
+        delivered,
+        failed,
+        openRate,
+        replyRate: 0,
+        activeTemplates,
+        optIns,
+        optOuts
       },
-      { $unwind: '$campaign' },
-      // if orgId present, scope by organization; otherwise return global metrics (super_admin)
-      ...(orgId ? [{ $match: { 'campaign.organizationId': orgId } }] : []),
-      { $facet: {
-          totalToday: [{ $match: { createdAt: { $gte: startOfDay } } }, { $count: 'count' }],
-          totalWeek: [{ $match: { createdAt: { $gte: startOfWeek } } }, { $count: 'count' }],
-          totalMonth: [{ $match: { createdAt: { $gte: startOfMonth } } }, { $count: 'count' }],
-          sentCount: [{ $match: { status: 'sent' } }, { $count: 'count' }],
-          deliveredCount: [{ $match: { status: 'delivered' } }, { $count: 'count' }],
-          readCount: [{ $match: { status: 'read' } }, { $count: 'count' }],
-        }
-      },
-    ];
-
-    const agg = await Message.aggregate(pipeline);
-    const res0 = agg[0] || {};
-
-    const totalToday = (res0.totalToday[0] && res0.totalToday[0].count) || 0;
-    const totalWeek = (res0.totalWeek[0] && res0.totalWeek[0].count) || 0;
-    const totalMonth = (res0.totalMonth[0] && res0.totalMonth[0].count) || 0;
-    const sent = (res0.sentCount[0] && res0.sentCount[0].count) || 0;
-    const delivered = (res0.deliveredCount[0] && res0.deliveredCount[0].count) || 0;
-    const read = (res0.readCount[0] && res0.readCount[0].count) || 0;
-
-    const deliveryRate = sent > 0 ? (delivered / sent) * 100 : 0;
-    const readRate = sent > 0 ? (read / sent) * 100 : 0;
-
-    const activeCampaigns = await Campaign.countDocuments(orgId ? { organizationId: orgId, status: { $in: ['running', 'scheduled'] } } : { status: { $in: ['running', 'scheduled'] } });
-
-    return sendResponse(res, true, { totalToday, totalWeek, totalMonth, deliveryRate, readRate, activeCampaigns }, 'Dashboard stats');
+      totalToday,
+      totalWeek,
+      totalMonth,
+      deliveryRate,
+      openRate,
+      activeCampaigns,
+      sentToday: totalToday
+    }, 'Dashboard stats');
   } catch (err) {
     console.error('getDashboardStats error:', err);
     return sendResponse(res, false, {}, 'Failed to get dashboard stats', 500);
@@ -86,14 +123,17 @@ exports.getCampaignAnalytics = async (req, res) => {
   try {
     const user = requireUser(req, res);
     if (!user) return;
-    const orgId = user.organizationId ? mongoose.Types.ObjectId(user.organizationId) : null;
+    const orgId = user.organizationId ? new mongoose.Types.ObjectId(user.organizationId) : null;
     const campaignId = req.params.id;
 
-    // verify campaign belongs to org
+    // verify campaign belongs to org (unless super_admin)
     const campaign = await Campaign.findById(campaignId);
-    if (!campaign || String(campaign.organizationId) !== String(orgId)) return sendResponse(res, false, {}, 'Campaign not found or forbidden', 404);
+    if (!campaign) return sendResponse(res, false, {}, 'Campaign not found', 404);
+    if (orgId && String(campaign.organizationId) !== String(orgId)) {
+      return sendResponse(res, false, {}, 'Forbidden', 403);
+    }
 
-    const match = { campaignId: new mongoose.Types.ObjectId(campaignId) };
+    const match = getQueryFilter(user, { campaignId: new mongoose.Types.ObjectId(campaignId) });
 
     const counts = await Message.aggregate([
       { $match: match },
@@ -111,14 +151,14 @@ exports.getCampaignAnalytics = async (req, res) => {
     const read = map.read || 0;
     const failed = map.failed || 0;
 
-    const deliveryRate = sent > 0 ? (delivered / sent) * 100 : 0;
-    const readRate = sent > 0 ? (read / sent) * 100 : 0;
+    const deliveryRate = sent > 0 ? Number(((delivered / sent) * 100).toFixed(1)) : 0;
+    const readRate = sent > 0 ? Number(((read / sent) * 100).toFixed(1)) : 0;
 
-    // hourly breakdown last 24 hours (by sentAt)
+    // hourly breakdown last 24 hours (by createdAt)
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const hourly = await Message.aggregate([
-      { $match: { campaignId: new mongoose.Types.ObjectId(campaignId), sentAt: { $gte: since } } },
-      { $project: { hour: { $hour: '$sentAt' } } },
+      { $match: { ...match, createdAt: { $gte: since } } },
+      { $project: { hour: { $hour: '$createdAt' } } },
       { $group: { _id: '$hour', count: { $sum: 1 } } },
       { $sort: { _id: 1 } },
     ]);
@@ -139,33 +179,46 @@ exports.getMessageTrends = async (req, res) => {
   try {
     const user = requireUser(req, res);
     if (!user) return;
-    const orgId = user.organizationId ? new mongoose.Types.ObjectId(user.organizationId) : null;
 
     const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const match = getQueryFilter(user, { createdAt: { $gte: since } });
 
     const agg = await Message.aggregate([
+      { $match: match },
       {
-        $lookup: { from: 'campaigns', localField: 'campaignId', foreignField: '_id', as: 'campaign' },
+        $group: {
+          _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+          sent: { $sum: { $cond: [{ $in: ['$status', ['sent', 'delivered', 'read']] }, 1, 0] } },
+          delivered: { $sum: { $cond: [{ $in: ['$status', ['delivered', 'read']] }, 1, 0] } },
+          read: { $sum: { $cond: [{ $eq: ['$status', 'read'] }, 1, 0] } },
+          failed: { $sum: { $cond: [{ $eq: ['$status', 'failed'] }, 1, 0] } }
+        }
       },
-      { $unwind: '$campaign' },
-      ...(orgId ? [{ $match: { 'campaign.organizationId': orgId, createdAt: { $gte: since } } }] : [{ $match: { createdAt: { $gte: since } } }]),
-      { $project: { day: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } } } },
-      { $group: { _id: '$day', count: { $sum: 1 } } },
-      { $sort: { _id: 1 } },
+      { $sort: { _id: 1 } }
     ]);
 
-    // ensure all last 30 days included
+    // Ensure all 30 days are seeded to prevent UI gaps
     const results = {};
     for (let i = 0; i < 30; i++) {
       const d = new Date();
       d.setDate(d.getDate() - (29 - i));
       const key = d.toISOString().slice(0, 10);
-      results[key] = 0;
+      results[key] = { sent: 0, delivered: 0, read: 0, failed: 0 };
     }
-    agg.forEach((r) => { results[r._id] = r.count; });
+    agg.forEach((r) => {
+      results[r._id] = { sent: r.sent, delivered: r.delivered, read: r.read, failed: r.failed };
+    });
 
-    const series = Object.keys(results).map((k) => ({ date: k, count: results[k] }));
-    return sendResponse(res, true, { series }, 'Message trends');
+    const series = Object.keys(results).map((k) => ({
+      date: k,
+      sent: results[k].sent,
+      delivered: results[k].delivered,
+      read: results[k].read,
+      failed: results[k].failed,
+      count: results[k].sent
+    }));
+
+    return sendResponse(res, true, series, 'Message trends');
   } catch (err) {
     console.error('getMessageTrends error:', err);
     return sendResponse(res, false, {}, 'Failed to get message trends', 500);
@@ -177,17 +230,27 @@ exports.getTopTemplates = async (req, res) => {
   try {
     const user = requireUser(req, res);
     if (!user) return;
-    const orgId = user.organizationId ? new mongoose.Types.ObjectId(user.organizationId) : null;
+    const match = getQueryFilter(user, { type: 'template' });
 
-    // Join messages -> campaigns -> templates, compute read rate per template
     const agg = await Message.aggregate([
-      { $lookup: { from: 'campaigns', localField: 'campaignId', foreignField: '_id', as: 'campaign' } },
-      { $unwind: '$campaign' },
-      ...(orgId ? [{ $match: { 'campaign.organizationId': orgId } }] : []),
-      { $lookup: { from: 'templates', localField: 'campaign.templateId', foreignField: '_id', as: 'template' } },
-      { $unwind: { path: '$template', preserveNullAndEmptyArrays: false } },
-      { $group: { _id: '$template._id', name: { $first: '$template.name' }, sent: { $sum: { $cond: [{ $eq: ['$status', 'sent'] }, 1, 0] } }, read: { $sum: { $cond: [{ $eq: ['$status', 'read'] }, 1, 0] } } } },
-      { $project: { name: 1, sent: 1, read: 1, readRate: { $cond: [{ $gt: ['$sent', 0] }, { $multiply: [{ $divide: ['$read', '$sent'] }, 100] }, 0] } } },
+      { $match: match },
+      {
+        $group: {
+          _id: '$template.name',
+          sent: { $sum: 1 },
+          delivered: { $sum: { $cond: [{ $in: ['$status', ['delivered', 'read']] }, 1, 0] } },
+          read: { $sum: { $cond: [{ $eq: ['$status', 'read'] }, 1, 0] } }
+        }
+      },
+      {
+        $project: {
+          name: '$_id',
+          sent: 1,
+          delivered: 1,
+          read: 1,
+          readRate: { $cond: [{ $gt: ['$sent', 0] }, { $multiply: [{ $divide: ['$read', '$sent'] }, 100] }, 0] }
+        }
+      },
       { $sort: { readRate: -1 } },
       { $limit: 10 },
     ]);
@@ -204,13 +267,11 @@ exports.getHeatmap = async (req, res) => {
   try {
     const user = requireUser(req, res);
     if (!user) return;
-    const orgId = user.organizationId ? mongoose.Types.ObjectId(user.organizationId) : null;
+    const match = getQueryFilter(user);
 
     const agg = await Message.aggregate([
-      { $lookup: { from: 'campaigns', localField: 'campaignId', foreignField: '_id', as: 'campaign' } },
-      { $unwind: '$campaign' },
-      { $match: { 'campaign.organizationId': orgId, sentAt: { $exists: true } } },
-      { $project: { hour: { $hour: '$sentAt' } } },
+      { $match: match },
+      { $project: { hour: { $hour: '$createdAt' } } },
       { $group: { _id: '$hour', count: { $sum: 1 } } },
       { $sort: { _id: 1 } },
     ]);
@@ -231,20 +292,21 @@ exports.getAudienceGrowth = async (req, res) => {
   try {
     const user = requireUser(req, res);
     if (!user) return;
-    const orgId = user.organizationId ? new mongoose.Types.ObjectId(user.organizationId) : null;
+    const orgId = user.role !== 'super_admin' ? user.organizationId : null;
+    const baseFilter = orgId ? { organizationId: new mongoose.Types.ObjectId(orgId) } : {};
 
-    // last 12 weeks: group by ISO week-year
+    // Group contacts over the last 12 weeks
     const since = new Date();
     since.setDate(since.getDate() - 7 * 12);
 
     const optInAgg = await Contact.aggregate([
-      { $match: { organizationId: orgId, optInTimestamp: { $gte: since } } },
+      { $match: { ...baseFilter, optInStatus: 'opted_in', optInTimestamp: { $gte: since } } },
       { $project: { week: { $dateToString: { format: '%Y-%U', date: '$optInTimestamp' } } } },
       { $group: { _id: '$week', count: { $sum: 1 } } },
     ]);
 
     const optOutAgg = await Contact.aggregate([
-      { $match: { organizationId: orgId, optOutTimestamp: { $gte: since } } },
+      { $match: { ...baseFilter, optInStatus: 'opted_out', optOutTimestamp: { $gte: since } } },
       { $project: { week: { $dateToString: { format: '%Y-%U', date: '$optOutTimestamp' } } } },
       { $group: { _id: '$week', count: { $sum: 1 } } },
     ]);
@@ -254,7 +316,8 @@ exports.getAudienceGrowth = async (req, res) => {
     for (let i = 0; i < 12; i++) {
       const d = new Date();
       d.setDate(d.getDate() - 7 * (11 - i));
-      const k = `${d.getFullYear()}-${String(Math.ceil(((d - new Date(d.getFullYear(),0,1))/(1000*60*60*24*7))+1)).padStart(2,'0')}`; // fallback key
+      const weekNum = String(Math.ceil(((d - new Date(d.getFullYear(),0,1))/(1000*60*60*24*7))+1)).padStart(2,'0');
+      const k = `${d.getFullYear()}-${weekNum}`;
       mapIn[k] = 0;
       mapOut[k] = 0;
     }

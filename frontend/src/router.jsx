@@ -20,6 +20,7 @@ import {
 } from './pages'
 
 import ProtectedRoute from './components/ProtectedRoute'
+import { ErrorBoundary } from './components/shared'
 
 export default function Router() {
   return (
@@ -48,8 +49,8 @@ export default function Router() {
       <Route path="/reports" element={<ProtectedRoute><ReportsPage /></ProtectedRoute>} />
       <Route path="/reports/opt" element={<ProtectedRoute><OptInOutPage /></ProtectedRoute>} />
 
-      <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
-      <Route path="/settings/users" element={<ProtectedRoute><UsersPage /></ProtectedRoute>} />
+      <Route path="/settings" element={<ProtectedRoute><ErrorBoundary><SettingsPage /></ErrorBoundary></ProtectedRoute>} />
+      <Route path="/settings/users" element={<ProtectedRoute><ErrorBoundary><UsersPage /></ErrorBoundary></ProtectedRoute>} />
 
       <Route path="*" element={<div>Not Found</div>} />
     </Routes>

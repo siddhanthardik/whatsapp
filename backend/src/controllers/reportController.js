@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const Message = require('../models/Message');
 const Contact = require('../models/Contact');
 const Campaign = require('../models/Campaign');
@@ -234,5 +235,213 @@ exports.exportOptOutCSV = async (req, res) => {
   } catch (err) {
     console.error('exportOptOutCSV error:', err);
     return res.status(500).send('Export failed');
+  }
+};
+
+// GET paginated global delivery report
+exports.getGlobalDeliveryReport = async (req, res) => {
+  try {
+    const user = requireUser(req, res); if (!user) return;
+    const { page = 1, limit = 100, campaign, status, q, from, to } = req.query;
+    const skip = (Math.max(Number(page), 1) - 1) * Math.max(Number(limit), 1);
+
+    const filter = { organizationId: new mongoose.Types.ObjectId(user.organizationId) };
+    if (status && status !== 'all') filter.status = status;
+    if (campaign && campaign !== 'All campaigns') filter['template.name'] = campaign;
+    if (from || to) {
+      filter.createdAt = {};
+      if (from) filter.createdAt.$gte = new Date(from);
+      if (to) filter.createdAt.$lte = new Date(to);
+    }
+
+    if (q) {
+      const re = new RegExp(String(q).trim(), 'i');
+      const matchingContacts = await Contact.find({
+        organizationId: user.organizationId,
+        $or: [{ name: re }, { phoneNumber: re }]
+      }).select('phoneNumber').lean();
+      const phoneNumbers = matchingContacts.map(c => c.phoneNumber);
+      filter.to = { $in: phoneNumbers };
+    }
+
+    const msgs = await Message.find(filter).sort({ createdAt: -1 }).skip(skip).limit(Number(limit)).lean();
+    const total = await Message.countDocuments(filter);
+
+    // enrich with contact info
+    const phoneNumbers = msgs.map(m => m.to).filter(Boolean);
+    const contacts = await Contact.find({ organizationId: user.organizationId, phoneNumber: { $in: phoneNumbers } }).lean();
+    const contactMap = {};
+    contacts.forEach(c => { contactMap[c.phoneNumber] = c; });
+
+    const rows = msgs.map(m => {
+      const contact = contactMap[m.to];
+      return {
+        id: m._id,
+        name: contact ? contact.name : 'Unknown Contact',
+        phone: m.to,
+        campaign: m.template?.name || 'Manual Broadcast',
+        template: m.template?.name || 'N/A',
+        status: m.status,
+        sentAt: m.createdAt ? m.createdAt.toISOString() : '—',
+        deliveredAt: m.status === 'delivered' || m.status === 'read' ? (m.updatedAt ? m.updatedAt.toISOString() : '—') : null,
+        readAt: m.status === 'read' ? (m.updatedAt ? m.updatedAt.toISOString() : '—') : null,
+        error: m.errorDetails || null
+      };
+    });
+
+    return sendResponse(res, true, rows, 'Global delivery report');
+  } catch (err) {
+    console.error('getGlobalDeliveryReport error:', err);
+    return sendResponse(res, false, {}, 'Failed to get global delivery report', 500);
+  }
+};
+
+// Stream CSV export of global delivery report
+exports.exportGlobalDeliveryReportCSV = async (req, res) => {
+  try {
+    const user = requireUser(req, res); if (!user) return;
+    const { campaign, status, q, from, to } = req.query;
+
+    const filter = { organizationId: new mongoose.Types.ObjectId(user.organizationId) };
+    if (status && status !== 'all') filter.status = status;
+    if (campaign && campaign !== 'All campaigns') filter['template.name'] = campaign;
+    if (from || to) {
+      filter.createdAt = {};
+      if (from) filter.createdAt.$gte = new Date(from);
+      if (to) filter.createdAt.$lte = new Date(to);
+    }
+
+    if (q) {
+      const re = new RegExp(String(q).trim(), 'i');
+      const matchingContacts = await Contact.find({
+        organizationId: user.organizationId,
+        $or: [{ name: re }, { phoneNumber: q }]
+      }).select('phoneNumber').lean();
+      const phoneNumbers = matchingContacts.map(c => c.phoneNumber);
+      filter.to = { $in: phoneNumbers };
+    }
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="delivery_report.csv"`);
+
+    const cursor = Message.find(filter).sort({ createdAt: -1 }).cursor();
+    const parser = new Parser({ fields: ['_id','name','phone','campaign','status','sentAt'] });
+
+    let first = true;
+    for await (const m of cursor) {
+      const contact = await Contact.findOne({ organizationId: user.organizationId, phoneNumber: m.to }).lean();
+      const row = {
+        _id: m._id,
+        name: contact ? contact.name : 'Unknown Contact',
+        phone: m.to,
+        campaign: m.template?.name || 'Manual Broadcast',
+        status: m.status,
+        sentAt: m.createdAt ? m.createdAt.toISOString() : ''
+      };
+      if (first) {
+        res.write(parser.parse([row]) + '\n');
+        first = false;
+      } else {
+        const csv = parser.parse([row]);
+        const lines = csv.split('\n');
+        lines.shift();
+        res.write(lines.join('\n') + '\n');
+      }
+    }
+    res.end();
+  } catch (err) {
+    console.error('exportGlobalDeliveryReportCSV error:', err);
+    return res.status(500).send('Export failed');
+  }
+};
+
+// Export PDF of global delivery report
+exports.exportGlobalDeliveryReportPDF = async (req, res) => {
+  try {
+    const user = requireUser(req, res); if (!user) return;
+    const { campaign, status, q, from, to } = req.query;
+
+    const filter = { organizationId: new mongoose.Types.ObjectId(user.organizationId) };
+    if (status && status !== 'all') filter.status = status;
+    if (campaign && campaign !== 'All campaigns') filter['template.name'] = campaign;
+    if (from || to) {
+      filter.createdAt = {};
+      if (from) filter.createdAt.$gte = new Date(from);
+      if (to) filter.createdAt.$lte = new Date(to);
+    }
+
+    if (q) {
+      const re = new RegExp(String(q).trim(), 'i');
+      const matchingContacts = await Contact.find({
+        organizationId: user.organizationId,
+        $or: [{ name: re }, { phoneNumber: re }]
+      }).select('phoneNumber').lean();
+      const phoneNumbers = matchingContacts.map(c => c.phoneNumber);
+      filter.to = { $in: phoneNumbers };
+    }
+
+    const msgs = await Message.find(filter).sort({ createdAt: -1 }).limit(1000).lean();
+    const total = msgs.length;
+    const sent = msgs.filter((m) => m.status === 'sent').length;
+    const delivered = msgs.filter((m) => m.status === 'delivered').length;
+    const read = msgs.filter((m) => m.status === 'read').length;
+    const failed = msgs.filter((m) => m.status === 'failed').length;
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="delivery_report.pdf"`);
+
+    const doc = new PDFDocument({ margin: 40, size: 'A4' });
+    doc.pipe(res);
+
+    // Header
+    doc.fontSize(18).text(process.env.COMPANY_NAME || 'WhatsApp Platform', { align: 'left' });
+    doc.fontSize(12).text(`Global Campaign Delivery Report`, { align: 'left' });
+    doc.moveDown();
+
+    // Summary table
+    doc.fontSize(10).text('Summary', { underline: true });
+    doc.moveDown(0.5);
+    doc.text(`Total messages: ${total}`);
+    doc.text(`Sent: ${sent}`);
+    doc.text(`Delivered: ${delivered}`);
+    doc.text(`Read: ${read}`);
+    doc.text(`Failed: ${failed}`);
+    doc.moveDown();
+
+    // Table
+    doc.fontSize(10).text('Messages (Top 1000)', { underline: true });
+    doc.moveDown(0.5);
+
+    const tableTop = doc.y;
+    const colWidths = [150, 100, 120, 80, 100];
+    doc.font('Helvetica-Bold');
+    doc.text('Contact', { continued: true, width: colWidths[0] });
+    doc.text('Phone', { continued: true, width: colWidths[1] });
+    doc.text('Campaign', { continued: true, width: colWidths[2] });
+    doc.text('Status', { continued: true, width: colWidths[3] });
+    doc.text('SentAt', { width: colWidths[4] });
+    doc.font('Helvetica');
+    doc.moveDown(0.5);
+
+    for (const m of msgs) {
+      const contact = await Contact.findOne({ organizationId: user.organizationId, phoneNumber: m.to }).lean();
+      const row = [
+        contact ? contact.name : 'Unknown Contact',
+        m.to,
+        m.template?.name || 'Manual Broadcast',
+        m.status,
+        m.createdAt ? m.createdAt.toISOString().slice(0, 19).replace('T', ' ') : ''
+      ];
+      for (let i = 0; i < row.length; i++) {
+        doc.text(String(row[i] || ''), { continued: i < row.length - 1, width: colWidths[i] });
+      }
+      doc.moveDown(0.5);
+      if (doc.y > 720) doc.addPage();
+    }
+
+    doc.end();
+  } catch (err) {
+    console.error('exportGlobalDeliveryReportPDF error:', err);
+    return res.status(500).send('PDF export failed');
   }
 };

@@ -5,6 +5,7 @@ import { Toaster } from 'react-hot-toast'
 import useAuthStore from './store/authStore'
 
 import AppShell from './components/layout/AppShell'
+import { UpgradeModal, ErrorBoundary } from './components/shared'
 
 import {
   LoginPage,
@@ -24,9 +25,10 @@ import {
   OptInOutPage,
   SettingsPage,
   UsersPage,
+  ProfilePage,
+  SuperAdminPage,
+  SystemHealthPage,
 } from './pages'
-
-
 
 function PrivateRoute({ children }) {
   const { isAuthenticated } = useAuthStore()
@@ -35,16 +37,20 @@ function PrivateRoute({ children }) {
 }
 
 function AppLayout() {
-  // Wraps protected pages with AppShell and renders nested routes via Outlet
   return (
     <AppShell>
       <Outlet />
+      <UpgradeModal />
     </AppShell>
   )
 }
 
 export default function App() {
-  const { isAuthenticated } = useAuthStore()
+  const { initAuth, isAuthenticated } = useAuthStore()
+
+  React.useEffect(() => {
+    initAuth()
+  }, [initAuth])
 
   return (
     <>
@@ -77,8 +83,12 @@ export default function App() {
             <Route path="/reports/delivery" element={<ReportsPage />} />
             <Route path="/reports/opt-in-out" element={<OptInOutPage />} />
 
-            <Route path="/settings" element={<SettingsPage />} />
-            <Route path="/settings/users" element={<UsersPage />} />
+            <Route path="/settings" element={<ErrorBoundary><SettingsPage /></ErrorBoundary>} />
+            <Route path="/settings/users" element={<ErrorBoundary><UsersPage /></ErrorBoundary>} />
+            <Route path="/settings/profile" element={<ErrorBoundary><ProfilePage /></ErrorBoundary>} />
+            <Route path="/profile" element={<ErrorBoundary><ProfilePage /></ErrorBoundary>} />
+            <Route path="/super-admin" element={<SuperAdminPage />} />
+            <Route path="/platform-admin/system-health" element={<SystemHealthPage />} />
           </Route>
 
           <Route path="*" element={<div>Not Found</div>} />

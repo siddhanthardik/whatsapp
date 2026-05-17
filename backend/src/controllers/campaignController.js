@@ -1,6 +1,7 @@
 const Campaign = require('../models/Campaign');
 const Template = require('../models/Template');
 const Contact = require('../models/Contact');
+const Subscription = require('../models/Subscription');
 const { createQueue } = require('../config/redis');
 
 function sendResponse(res, success, data = {}, message = '', status = 200) {
@@ -67,6 +68,14 @@ exports.createCampaign = async (req, res) => {
     });
 
     await campaign.save();
+    
+    // Update usage tracking
+    if (user.organizationId) {
+      await Subscription.updateOne(
+        { organizationId: user.organizationId },
+        { $inc: { currentCampaignsThisMonth: 1 } }
+      );
+    }
 
     // if scheduleNow, enqueue jobs immediately (same behavior as launch)
     if (scheduleNow) {
@@ -207,6 +216,14 @@ exports.deleteCampaign = async (req, res) => {
     if (String(campaign.organizationId) !== String(user.organizationId) && user.role !== 'super_admin') return sendResponse(res, false, {}, 'Forbidden', 403);
     if (campaign.status === 'running') return sendResponse(res, false, {}, 'Cannot delete running campaign', 400);
     await Campaign.findByIdAndDelete(id);
+    
+    if (user.organizationId) {
+      await Subscription.updateOne(
+        { organizationId: user.organizationId },
+        { $inc: { currentCampaignsThisMonth: -1 } }
+      );
+    }
+
     return sendResponse(res, true, {}, 'Campaign deleted');
   } catch (err) {
     console.error('deleteCampaign error:', err);

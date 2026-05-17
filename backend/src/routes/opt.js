@@ -10,10 +10,10 @@ router.get('/ins', verifyToken, requireOrgAccess, optController.getOptInList);
 router.get('/outs', verifyToken, requireOrgAccess, optController.getOptOutList);
 
 // POST /api/opt/contacts/:contactId/opt-out (manual)
-router.post('/contacts/:contactId/opt-out', verifyToken, requireRole('org_admin', 'super_admin', 'campaign_manager'), optController.manualOptOut);
+router.post('/contacts/:contactId/opt-out', verifyToken, requireRole('admin', 'owner', 'super_admin', 'manager'), optController.manualOptOut);
 
 // POST /api/opt/contacts/:contactId/opt-in (manual re-opt-in)
-router.post('/contacts/:contactId/opt-in', verifyToken, requireRole('org_admin', 'super_admin', 'campaign_manager'), optController.manualOptIn);
+router.post('/contacts/:contactId/opt-in', verifyToken, requireRole('admin', 'owner', 'super_admin', 'manager'), optController.manualOptIn);
 
 // POST /api/opt/web (public web form opt-in)
 router.post('/web', optController.processWebOptIn);
@@ -22,6 +22,6 @@ router.post('/web', optController.processWebOptIn);
 router.get('/stats', verifyToken, requireOrgAccess, optController.getOptInStats);
 
 // GET /api/opt/outs/export
-router.get('/outs/export', verifyToken, requireRole('org_admin', 'super_admin', 'campaign_manager'), optController.exportOptOutList);
+router.get('/outs/export', verifyToken, requireRole('admin', 'owner', 'super_admin', 'manager'), optController.exportOptOutList);
 
 module.exports = router;

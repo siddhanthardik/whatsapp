@@ -5,6 +5,7 @@ const speakeasy = require('speakeasy');
 
 const User = require('../models/User');
 const Organization = require('../models/Organization');
+const Subscription = require('../models/Subscription');
 
 // Helper to send standardized responses
 function sendResponse(res, success, data = {}, message = '', status = 200) {
@@ -35,9 +36,14 @@ exports.register = async (req, res) => {
 
     // If no organizationId provided, create a new Organization for this user
     let orgId = organizationId || null;
+    
+    // Enforce role: org creators are 'owner', others are 'agent' by default
+    // In a real system, joining an existing org without an invite should be blocked,
+    // but for now we enforce 'agent' to prevent role escalation on self-registration.
+    const assignedRole = !orgId ? 'owner' : 'agent';
 
     // Create user first; we'll attach org after creating org so ownerId references user
-    const user = new User({ name, email, password, role, organizationId: orgId });
+    const user = new User({ name, email, password, role: assignedRole, organizationId: orgId });
     await user.save();
 
     if (!orgId) {
@@ -109,7 +115,7 @@ exports.login = async (req, res) => {
     user.refreshTokens.push({ token: refreshToken });
     await user.save();
 
-    return sendResponse(res, true, { accessToken, refreshToken }, 'Login successful');
+    return sendResponse(res, true, { user: user.toJSON(), accessToken, refreshToken }, 'Login successful');
   } catch (err) {
     // Temporary debug log: print incoming email (not password) and the error stack
     try {
@@ -295,5 +301,79 @@ exports.verify2FA = async (req, res) => {
   } catch (err) {
     console.error(err);
     return sendResponse(res, false, {}, '2FA verification failed', 500);
+  }
+};
+
+// Get currently authenticated user details, organization details, and subscription
+exports.getMe = async (req, res) => {
+  try {
+    const userId = req.user && req.user.id;
+    if (!userId) return sendResponse(res, false, {}, 'Authentication required', 401);
+
+    const user = await User.findById(userId).select('-password -twoFactorSecret -refreshTokens');
+    if (!user) return sendResponse(res, false, {}, 'User not found', 404);
+
+    let organization = null;
+    let subscription = null;
+
+    if (user.organizationId) {
+      organization = await Organization.findById(user.organizationId);
+      subscription = await Subscription.findOne({ organizationId: user.organizationId });
+      
+      // If organization exists but no subscription record, auto-create a free one
+      if (organization && !subscription) {
+        subscription = new Subscription({
+          organizationId: user.organizationId,
+          plan: 'free',
+          status: 'active',
+          maxContacts: 500,
+          maxCampaignsPerMonth: 2,
+          maxUsers: 1,
+          maxTemplates: 5,
+          maxMessagesPerMonth: 1000,
+        });
+        await subscription.save();
+      }
+    }
+
+    const payloadUser = {
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      isActive: user.isActive,
+      avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name)}&background=0ea5e9&color=fff&bold=true`,
+      createdAt: user.createdAt,
+      organization: organization ? {
+        _id: organization._id,
+        name: organization.name,
+        email: organization.email,
+      } : null,
+      subscription: subscription ? {
+        plan: subscription.plan,
+        status: subscription.status,
+        billingCycle: subscription.billingCycle,
+        startDate: subscription.startDate,
+        expiryDate: subscription.expiryDate,
+        maxContacts: subscription.maxContacts,
+        maxCampaignsPerMonth: subscription.maxCampaignsPerMonth,
+        maxUsers: subscription.maxUsers,
+        maxTemplates: subscription.maxTemplates,
+        maxMessagesPerMonth: subscription.maxMessagesPerMonth,
+        currentContacts: subscription.currentContacts,
+        currentCampaignsThisMonth: subscription.currentCampaignsThisMonth,
+        currentUsers: subscription.currentUsers,
+        currentMessagesThisMonth: subscription.currentMessagesThisMonth,
+      } : null,
+    };
+
+    return sendResponse(res, true, {
+      user: payloadUser,
+      organization: payloadUser.organization,
+      subscription: payloadUser.subscription,
+    }, 'User session hydrated');
+  } catch (err) {
+    console.error('getMe error:', err);
+    return sendResponse(res, false, {}, 'Failed to get session details', 500);
   }
 };

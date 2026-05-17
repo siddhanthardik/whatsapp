@@ -1,6 +1,8 @@
 const { parse } = require('csv-parse/sync');
 const mongoose = require('mongoose');
 const Contact = require('../models/Contact');
+const ContactGroup = require('../models/ContactGroup');
+const Subscription = require('../models/Subscription');
 const User = require('../models/User');
 
 function sendResponse(res, success, data = {}, message = '', status = 200) {
@@ -162,6 +164,19 @@ exports.importContacts = async (req, res) => {
     const existingSet = new Set(existing.map(e => e.phoneNumber));
 
     const toInsert = docs.filter(d => !existingSet.has(d.phoneNumber));
+    
+    // Check subscription limits if inserting new contacts
+    if (toInsert.length > 0 && orgId) {
+      const sub = await Subscription.findOne({ organizationId: orgId, status: 'active' });
+      if (sub && sub.currentContacts + toInsert.length > sub.maxContacts) {
+        return res.status(402).json({
+          success: false,
+          code: 'PLAN_LIMIT_REACHED',
+          message: `Contact limit reached. You can only add ${Math.max(0, sub.maxContacts - sub.currentContacts)} more contacts.`
+        });
+      }
+    }
+
     const duplicateDocs = docs.filter(d => existingSet.has(d.phoneNumber));
     const duplicates = duplicateDocs.map(d => d.phoneNumber);
 
@@ -180,6 +195,9 @@ exports.importContacts = async (req, res) => {
         } else if (e && e.message) {
           errors.push({ errmsg: e.message });
         }
+      }
+      if (inserted.length > 0 && orgId) {
+        await Subscription.updateOne({ organizationId: orgId }, { $inc: { currentContacts: inserted.length } });
       }
     }
 
@@ -231,6 +249,14 @@ exports.createContact = async (req, res) => {
     // check duplicate
     const existing = await Contact.findOne({ phoneNumber: normalizedPhone, organizationId: orgId });
     if (existing) return sendResponse(res, false, {}, 'Contact already exists', 409);
+    
+    // Check limit
+    if (orgId) {
+      const sub = await Subscription.findOne({ organizationId: orgId, status: 'active' });
+      if (sub && sub.currentContacts >= sub.maxContacts) {
+        return res.status(402).json({ success: false, code: 'PLAN_LIMIT_REACHED', message: 'Contact limit reached.' });
+      }
+    }
 
     const contact = new Contact({
       phoneNumber: normalizedPhone,
@@ -245,7 +271,13 @@ exports.createContact = async (req, res) => {
       optInSource: 'manual',
       optInTimestamp: new Date(),
     });
+    
     await contact.save();
+    
+    if (orgId) {
+      await Subscription.updateOne({ organizationId: orgId }, { $inc: { currentContacts: 1 } });
+    }
+
     return sendResponse(res, true, { contact }, 'Contact created', 201);
   } catch (err) {
     console.error('createContact error:', err);
@@ -295,15 +327,24 @@ exports.deleteContact = async (req, res) => {
     const user = req.user;
     if (!user) return sendResponse(res, false, {}, 'Authentication required', 401);
 
-    const { id } = req.params;
-    const contact = await Contact.findById(id);
+    const { id: targetId } = req.params;
+    const contact = await Contact.findById(targetId);
     if (!contact) return sendResponse(res, false, {}, 'Contact not found', 404);
 
-    if (user.role !== 'super_admin' && String(contact.organizationId) !== String(user.organizationId)) {
-      return sendResponse(res, false, {}, 'Forbidden: organization access denied', 403);
+    const orgId = user.organizationId ? String(user.organizationId) : null;
+    const contactOrgId = String(contact.organizationId);
+
+    // Bypassing check if super_admin; else must match
+    if (user.role !== 'super_admin' && (!orgId || orgId !== contactOrgId)) {
+      return sendResponse(res, false, {}, 'Forbidden: organization mismatch', 403);
     }
 
-    await Contact.findByIdAndDelete(id);
+    await Contact.findByIdAndDelete(targetId);
+    
+    if (contactOrgId) {
+      await Subscription.updateOne({ organizationId: contactOrgId }, { $inc: { currentContacts: -1 } });
+    }
+
     return sendResponse(res, true, {}, 'Contact deleted');
   } catch (err) {
     console.error('deleteContact error:', err);
